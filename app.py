@@ -711,10 +711,61 @@ def api_saves_list():
     return jsonify(sorted(p.stem for p in SAVES_DIR.glob("*.json") if not p.name.endswith(".bak.json")))
 
 
+def safe_save_name(raw_name):
+    # Save names are restricted to safe filename characters and trimmed.
+    name = re.sub(r"[^a-zA-Z0-9_\-]", "", str(raw_name or ""))
+    return name[:64]
+
+
+@app.route("/api/save/rename", methods=["POST"])
+def api_save_rename():
+    data = request.get_json(silent=True) or {}
+    old_name = safe_save_name(data.get("old_name"))
+    new_name = safe_save_name(data.get("new_name"))
+    if not old_name or not new_name:
+        return jsonify({"error": "Укажите корректные имена сохранений (латиница, цифры, _ и -)."}), 400
+    old_path = SAVES_DIR / f"{old_name}.json"
+    new_path = SAVES_DIR / f"{new_name}.json"
+    if not old_path.exists():
+        return jsonify({"error": "Сохранение не найдено."}), 404
+    if old_name == new_name:
+        return jsonify({"ok": True, "name": new_name})
+    if new_path.exists():
+        return jsonify({"error": "Сохранение с таким именем уже существует."}), 409
+    try:
+        old_path.rename(new_path)
+        old_backup = SAVES_DIR / f"{old_name}.bak.json"
+        new_backup = SAVES_DIR / f"{new_name}.bak.json"
+        if old_backup.exists() and not new_backup.exists():
+            old_backup.rename(new_backup)
+    except OSError as e:
+        return jsonify({"error": f"Не удалось переименовать сохранение: {e}"}), 500
+    return jsonify({"ok": True, "name": new_name})
+
+
+@app.route("/api/save/delete", methods=["POST"])
+def api_save_delete():
+    data = request.get_json(silent=True) or {}
+    name = safe_save_name(data.get("name"))
+    if not name:
+        return jsonify({"error": "Некорректное имя сохранения."}), 400
+    path = SAVES_DIR / f"{name}.json"
+    if not path.exists():
+        return jsonify({"error": "Сохранение не найдено."}), 404
+    try:
+        path.unlink()
+        backup = SAVES_DIR / f"{name}.bak.json"
+        if backup.exists():
+            backup.unlink()
+    except OSError as e:
+        return jsonify({"error": f"Не удалось удалить сохранение: {e}"}), 500
+    return jsonify({"ok": True, "name": name})
+
+
 @app.route("/api/save", methods=["POST"])
 def api_save():
     data = request.get_json(silent=True) or {}
-    name = re.sub(r"[^a-zA-Z0-9_\-]", "", data.get("name") or "") or "default"
+    name = safe_save_name(data.get("name")) or "default"
     path = SAVES_DIR / f"{name}.json"
     payload = {"schema_version": 2, "messages": data.get("messages") or [],
                "state": data.get("state") or DEFAULT_STATE}
