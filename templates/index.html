@@ -365,7 +365,7 @@ const AVATAR_KEY = 'rpg_avatar_v1';
 const TTS_KEY = 'rpg_tts_v1';
 
 const EMPTY_STATE = {
-  name:"Пустой", race:"", class:"", background:"",
+  name:"Пустой", race:"", class:"", background:"", appearance:"",
   level:1, xp:0, xp_next:100,
   hp:10, max_hp:10, gold:0,
   stats:{str:10,dex:10,con:10,int:10,wis:10,cha:10},
@@ -431,32 +431,43 @@ const COVER_LABELS = {
 function getPositionInfo(pos) { return POSITION_LABELS[pos] || { icon: '❔', label: pos || '—', mod: 0 }; }
 function getCoverInfo(cov) { return COVER_LABELS[cov] || { icon: '', label: cov || '—', mod: 0 }; }
 
-/* AVATAR */
+/* AVATAR — Perchance free image generation */
+const PERCHANCE_API_URL = 'https://perchance.org/perchance-ai-api';
+const PERCHANCE_CHARACTER_URL = 'https://perchance.org/ai-character-generator';
+let avatarGenerationId = 0;
 function detectArchetype(st) {
-  const s = st.stats || {};
   const cls = (st.class || '').toLowerCase();
   const clsMap = {
-    'воин': 'warrior knight fighter', 'варвар': 'barbarian berserker',
-    'паладин': 'paladin knight holy', 'плут': 'rogue assassin thief',
-    'следопыт': 'ranger archer hunter', 'монах': 'monk martial artist',
-    'маг': 'wizard mage sorcerer', 'жрец': 'cleric priest',
-    'друид': 'druid nature shaman', 'бард': 'bard musician',
-    'колдун': 'warlock dark mage', 'чародей': 'sorcerer magic'
+    'воин': 'воин, боец ближнего боя', 'варвар': 'варвар, свирепый берсерк',
+    'паладин': 'паладин, священный рыцарь', 'плут': 'плут, ловкий вор или убийца',
+    'следопыт': 'следопыт, охотник и лучник', 'монах': 'монах, мастер боевых искусств',
+    'маг': 'маг, учёный волшебник', 'жрец': 'жрец, служитель божества',
+    'друид': 'друид, хранитель природы', 'бард': 'бард, странствующий музыкант',
+    'колдун': 'колдун, маг тёмного договора', 'чародей': 'чародей, врождённый маг'
   };
   for (const key in clsMap) { if (cls.includes(key)) return clsMap[key]; }
-  const values = [['str','warrior knight'],['dex','rogue thief'],['int','wizard mage'],['wis','cleric druid'],['cha','bard warlock']];
-  let best = ['str', 'adventurer'], maxVal = -1;
-  for (const [k, role] of values) {
-    if ((s[k] || 10) > maxVal) { maxVal = s[k] || 10; best = [k, role]; }
-  }
-  return best[1];
+  return st.class || 'исследователь приключений';
 }
-function buildAvatarPrompt(st) {
-  const archetype = detectArchetype(st);
-  const conditions = (st.conditions || []).join(', ');
-  const race = st.race ? st.race + ' ' : '';
-  const name = st.name || 'Adventurer';
-  return `Fantasy RPG character portrait of ${name}, ${race}${archetype}, level ${st.level}, detailed digital painting, dramatic lighting, dark atmospheric background, painterly style, high quality, centered composition${conditions ? ', ' + conditions : ''}`;
+function getAvatarAppearance(st) {
+  if (st.appearance && String(st.appearance).trim()) return String(st.appearance).trim();
+  // Legacy saves may not yet have the appearance field. Reuse the player's own opening description.
+  const firstUser = (messages || []).find(m => m.role === 'user' && m.content && !/^\[\[(БРОСОК|СИСТЕМА)\]\]/.test(m.content));
+  return firstUser ? String(firstUser.content).slice(0, 1200).trim() : '';
+}
+function buildAvatarPrompt(st, appearanceOverride) {
+  const appearance = String(appearanceOverride !== undefined ? appearanceOverride : getAvatarAppearance(st)).trim();
+  const parts = [
+    'Портрет игрового персонажа для фэнтезийной RPG.',
+    `Имя: ${st.name || 'Безымянный'}.`,
+    st.race ? `Раса: ${st.race}.` : '',
+    st.class ? `Класс: ${st.class} (${detectArchetype(st)}).` : '',
+    st.background ? `Предыстория: ${st.background}.` : '',
+    appearance ? `ТОЧНОЕ ОПИСАНИЕ ВНЕШНОСТИ ПЕРСОНАЖА — следуй ему буквально, не заменяй и не добавляй противоречащие детали: ${appearance}.` : '',
+    'Сохрани указанную расу, пол, возраст, телосложение, цвет кожи, причёску, цвет глаз, одежду, броню, оружие и отличительные черты. Если деталь не указана, выбери сдержанный вариант, подходящий миру и классу.',
+    'Один персонаж, плечевой портрет по грудь, лицо хорошо видно, персонаж в центре кадра, выразительное лицо, детализированная одежда и экипировка, профессиональная иллюстрация персонажа для настольной RPG, реалистичная fantasy concept art, кинематографический мягкий свет, аккуратная композиция, без текста, без букв, без водяных знаков.'
+  ].filter(Boolean);
+  // Keep the user's Russian description intact; add English rendering cues for better compatibility.
+  return parts.join('\n') + '\n\nHigh quality fantasy RPG character portrait, detailed digital painting, faithful to the exact character description, centered bust portrait, clear face, coherent anatomy, intricate costume, no text, no watermark.';
 }
 function cachedAvatarFor(name) {
   try {
@@ -467,10 +478,49 @@ function cachedAvatarFor(name) {
   } catch(e){}
   return null;
 }
-function saveAvatar(name, url) {
-  try { localStorage.setItem(AVATAR_KEY, JSON.stringify({name, url})); } catch(e){}
+function saveAvatar(name, url, prompt) {
+  try { localStorage.setItem(AVATAR_KEY, JSON.stringify({name, url, prompt: prompt || '', provider:'perchance'})); } catch(e){}
 }
-function generateAvatar(force) {
+function perchanceGenerateImage(prompt) {
+  return new Promise((resolve, reject) => {
+    const id = 'rpg_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 9);
+    const params = new URLSearchParams({
+      prompt, format: 'json', id,
+      resolution: '512x512', guidanceScale: '8',
+      negativePrompt: 'blurry, low quality, distorted face, bad anatomy, extra fingers, extra limbs, duplicate person, cropped head, text, watermark, logo'
+    });
+    const frame = document.createElement('iframe');
+    frame.title = 'Perchance avatar generation';
+    frame.style.cssText = 'position:fixed;width:1px;height:1px;left:-10px;top:-10px;opacity:0;pointer-events:none;border:0';
+    let settled = false;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      window.removeEventListener('message', onMessage);
+      clearTimeout(timer);
+      frame.remove();
+      fn(value);
+    };
+    const onMessage = (event) => {
+      if (event.source !== frame.contentWindow) return;
+      if (event.origin !== 'https://perchance.org' && !/^https:\/\/([a-z0-9-]+\.)*perchance\.org$/.test(event.origin)) return;
+      const data = event.data || {};
+      if (data.api !== 'perchance-image-api' || !data.result || data.result.id !== id) return;
+      if (data.result.ok && (data.result.url || data.result.dataUrl)) finish(resolve, data.result.url || data.result.dataUrl);
+      else finish(reject, new Error(data.result.error || 'Perchance не смог создать изображение'));
+    };
+    const timer = setTimeout(() => finish(reject, new Error('Perchance не ответил за 120 секунд. Попробуй ещё раз или открой генератор вручную.')), 120000);
+    window.addEventListener('message', onMessage);
+    frame.src = PERCHANCE_API_URL + '?' + params.toString();
+    document.body.appendChild(frame);
+  });
+}
+function avatarFallback(prompt) {
+  // A reliable fallback that does not charge Yandex tokens; user can still open Perchance manually.
+  const url = PERCHANCE_CHARACTER_URL;
+  return url + (prompt ? '?prompt=' + encodeURIComponent(prompt) : '');
+}
+async function generateAvatar(force, appearanceOverride) {
   if (!state || !state.name || state.name === 'Пустой') return;
   const wrap = document.querySelector('.avatar-wrap');
   if (!wrap) return;
@@ -478,25 +528,36 @@ function generateAvatar(force) {
     const cached = cachedAvatarFor(state.name);
     if (cached) { wrap.innerHTML = `<img src="${cached.url}" alt="${esc(state.name)}">`; return; }
   }
-  wrap.innerHTML = '<div class="avatar-placeholder">?</div>';
+  const generationId = ++avatarGenerationId;
+  const prompt = buildAvatarPrompt(state, appearanceOverride);
+  wrap.innerHTML = '<div class="avatar-placeholder">…</div>';
   wrap.classList.add('loading');
-  const prompt = buildAvatarPrompt(state);
-  const seed = Math.floor(Math.random() * 999999);
-  const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=256&height=256&seed=${seed}&nologo=true&model=flux&enhance=true`;
-  const img = new Image();
-  img.crossOrigin = 'anonymous';
-  img.onload = () => {
+  try {
+    const url = await perchanceGenerateImage(prompt);
+    if (generationId !== avatarGenerationId) return;
+    const img = new Image();
+    img.onload = () => {
+      if (generationId !== avatarGenerationId) return;
+      wrap.classList.remove('loading');
+      wrap.innerHTML = `<img src="${url}" alt="${esc(state.name)}">`;
+      saveAvatar(state.name, url, prompt);
+      if (document.getElementById('avatar-generation-status')) document.getElementById('avatar-generation-status').textContent = 'Портрет создан в Perchance.';
+    };
+    img.onerror = () => {
+      if (generationId !== avatarGenerationId) return;
+      wrap.classList.remove('loading');
+      wrap.innerHTML = '<div class="avatar-placeholder">?</div>';
+      if (document.getElementById('avatar-generation-status')) document.getElementById('avatar-generation-status').textContent = 'Perchance вернул ссылку, но изображение не загрузилось. Открой генератор вручную.';
+    };
+    img.src = url;
+  } catch (e) {
+    if (generationId !== avatarGenerationId) return;
     wrap.classList.remove('loading');
-    wrap.innerHTML = `<img src="${url}" alt="${esc(state.name)}">`;
-    saveAvatar(state.name, url);
-  };
-  img.onerror = () => {
-    const fallback = `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(state.name)}&backgroundColor=24201d&radius=50`;
-    wrap.classList.remove('loading');
-    wrap.innerHTML = `<img src="${fallback}" alt="${esc(state.name)}">`;
-    saveAvatar(state.name, fallback);
-  };
-  img.src = url;
+    wrap.innerHTML = '<div class="avatar-placeholder">?</div>';
+    const status = document.getElementById('avatar-generation-status');
+    if (status) status.textContent = 'Автогенерация не сработала: ' + e.message;
+    addMsg('system', 'Не удалось автоматически получить портрет из Perchance. Можно открыть генератор и вставить подготовленное описание.');
+  }
 }
 function maybeGenerateAvatar() {
   if (!state || !state.name || state.name === 'Пустой') return;
@@ -508,22 +569,42 @@ function maybeGenerateAvatar() {
 }
 function openAvatarModal() {
   if (!state || !state.name || state.name === 'Пустой') {
-    addMsg('system', 'Имя персонажа ещё не определено. Сыграйте пару ходов.');
+    addMsg('system', 'Имя персонажа ещё не определено. Сначала опишите персонажа мастеру.');
     return;
   }
   const cached = cachedAvatarFor(state.name);
   const imgSrc = cached ? cached.url : '';
+  const appearance = getAvatarAppearance(state);
+  const prompt = buildAvatarPrompt(state, appearance);
   modalContent.innerHTML = `
     <h3>🖼 Портрет: ${esc(state.name)}</h3>
-    ${imgSrc ? `<img class="avatar-large" src="${imgSrc}" alt="${esc(state.name)}">` : `<div style="text-align:center;padding:20px;color:var(--text-secondary)">Портрет ещё не сгенерирован</div>`}
-    <button class="btn primary" id="regen-avatar">⟳ Сгенерировать заново</button>
+    ${imgSrc ? `<img class="avatar-large" src="${imgSrc}" alt="${esc(state.name)}">` : `<div style="text-align:center;padding:12px;color:var(--text-secondary)">Портрет ещё не создан</div>`}
+    <label for="avatar-appearance" style="font-size:13px;color:var(--text-secondary)">Внешность персонажа (можно писать по-русски)</label>
+    <textarea id="avatar-appearance" rows="4" style="width:100%;box-sizing:border-box;background:var(--bg-deep);border:1px solid var(--border-subtle);border-radius:8px;padding:10px;color:var(--text-primary);font:14px var(--font-sans);resize:vertical" placeholder="Например: молодая эльфийка с серебряными волосами до пояса, зелёными глазами, бледной кожей, шрамом на левой щеке; тёмно-зелёный кожаный плащ и два кинжала.">${esc(appearance)}</textarea>
+    <div id="avatar-generation-status" style="font-size:12px;color:var(--text-secondary)">Perchance — бесплатный генератор. Русское описание сохраняется и передаётся без удаления деталей.</div>
+    <button class="btn primary" id="regen-avatar">✨ Создать портрет в Perchance</button>
+    <button class="btn" id="open-perchance-avatar">↗ Открыть Perchance с описанием</button>
     <button class="btn" onclick="document.getElementById('modal').classList.remove('open')">Закрыть</button>
   `;
   modalEl.classList.add('open');
-  document.getElementById('regen-avatar').onclick = () => {
+  document.getElementById('regen-avatar').onclick = async () => {
+    const field = document.getElementById('avatar-appearance');
+    const newAppearance = field ? field.value.trim() : '';
+    state.appearance = newAppearance;
+    persist();
     localStorage.removeItem(AVATAR_KEY);
+    const status = document.getElementById('avatar-generation-status');
+    if (status) status.textContent = 'Создаю портрет в Perchance… Обычно это занимает некоторое время.';
     modalEl.classList.remove('open');
-    generateAvatar(true);
+    await generateAvatar(true, newAppearance);
+  };
+  document.getElementById('open-perchance-avatar').onclick = async () => {
+    const field = document.getElementById('avatar-appearance');
+    const text = buildAvatarPrompt(state, field ? field.value.trim() : '');
+    try { await navigator.clipboard.writeText(text); } catch(e) {}
+    window.open(PERCHANCE_CHARACTER_URL, '_blank', 'noopener');
+    const status = document.getElementById('avatar-generation-status');
+    if (status) status.textContent = 'Описание скопировано. Вставь его в поле Description на странице Perchance.';
   };
 }
 

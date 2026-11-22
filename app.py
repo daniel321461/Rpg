@@ -312,7 +312,7 @@ STATE_EXTRACT_PROMPT = """
 Верни СТРОГО валидный JSON без markdown:
 {
   "name": "имя или Пустой",
-  "race": "", "class": "", "background": "",
+  "race": "", "class": "", "background": "", "appearance": "",
   "level": 1, "xp": 0, "xp_next": 100,
   "hp": 10, "max_hp": 10, "gold": 0,
   "stats": {"str":10,"dex":10,"con":10,"int":10,"wis":10,"cha":10},
@@ -357,6 +357,7 @@ XP начисляется сервером только из новых репл
 - Инвентарь — без дублей.
 
 RACE, CLASS, BACKGROUND: сохрани, если уже есть. Меняй только при событии в игре.
+APPEARANCE: кратко сохрани только явно описанную игроком внешность персонажа (возраст, телосложение, кожа, волосы, глаза, лицо, одежда, особые приметы). Не выдумывай детали; если описания нет — оставь пустую строку. Это поле нужно для портрета.
 
 STATS: если раса/класс только появились и все 10 — выставь по классу + расовые бонусы. Если уже не 10 — не пересчитывай.
 
@@ -416,7 +417,7 @@ SUMMARY_PROMPT = """
 DICE_RE = re.compile(r"^\s*(\d*)d(\d+)([+-]\d+)?\s*$", re.IGNORECASE)
 
 DEFAULT_STATE = {
-    "name": "Пустой", "race": "", "class": "", "background": "",
+    "name": "Пустой", "race": "", "class": "", "background": "", "appearance": "",
     "level": 1, "xp": 0, "xp_next": 100,
     "hp": 10, "max_hp": 10, "gold": 0,
     "stats": {"str": 10, "dex": 10, "con": 10, "int": 10, "wis": 10, "cha": 10},
@@ -666,7 +667,7 @@ def extract_state(messages, current_state):
     merged["xp"] = xp
     merged["xp_event_ids"] = processed[-500:]
     # Protect core scalar values from blank/null model output.
-    for f in ("name", "race", "class", "background", "position", "cover", "weapon_in_hand"):
+    for f in ("name", "race", "class", "background", "appearance", "position", "cover", "weapon_in_hand"):
         if not merged.get(f) and current.get(f):
             merged[f] = current[f]
     merged["hp"] = max(0, min(int(merged.get("hp", 0) or 0), int(merged.get("max_hp", 1) or 1)))
@@ -677,7 +678,7 @@ def extract_state(messages, current_state):
     merged["level_pending"] = max(0, derived_level - previous_level)
     merged["gold"] = max(0, int(merged.get("gold", 0) or 0))
     merged["dc_modifier"] = int(merged.get("dc_modifier", 0) or 0)
-    for f in ("race", "class", "background", "position", "cover", "weapon_in_hand"):
+    for f in ("race", "class", "background", "appearance", "position", "cover", "weapon_in_hand"):
         if not isinstance(merged.get(f), str): merged[f] = current.get(f, DEFAULT_STATE[f])
     if not isinstance(merged.get("restrained"), bool): merged["restrained"] = bool(current.get("restrained", False))
     for f in ("inventory", "notes", "quests", "conditions", "relationships", "faction_clocks",
