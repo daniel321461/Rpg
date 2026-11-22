@@ -46,6 +46,10 @@ else:
         client = OpenAI(api_key=API_KEY)
     PROVIDER = "OpenAI-compatible/local"
 
+# Optional cheaper models for background maintenance tasks. If unset, the main model is used.
+STATE_MODEL = os.getenv("YANDEX_STATE_MODEL") or os.getenv("STATE_MODEL") or MODEL
+SUMMARY_MODEL = os.getenv("YANDEX_SUMMARY_MODEL") or os.getenv("SUMMARY_MODEL") or MODEL
+
 BASE_DIR = Path(__file__).resolve().parent
 SAVES_DIR = BASE_DIR / "saves"
 SAVES_DIR.mkdir(exist_ok=True)
@@ -422,16 +426,17 @@ DEFAULT_STATE = {
     "dc_modifier": 0, "dc_modifier_reasons": [],
     "position": "стоит", "cover": "нет",
     "weapon_in_hand": "", "restrained": False,
-    "level_history": [], "xp_event_ids": [], "level_pending": 0
+    "level_history": [], "xp_event_ids": [], "level_pending": 0,
+    "state_extract_counter": 0
 }
 
 
-MAX_MESSAGES_BEFORE_SUMMARY = 24
-KEEP_RECENT = 10
+MAX_MESSAGES_BEFORE_SUMMARY = int(os.getenv("RPG_SUMMARY_THRESHOLD", "24"))
+KEEP_RECENT = int(os.getenv("RPG_KEEP_RECENT_MESSAGES", "10"))
 
 
 def summarize_old_messages(messages):
-    """Rolling summary: retain one summary and a bounded recent dialogue window."""
+    """Create a rolling campaign summary only when explicitly requested by /api/compact."""
     if not isinstance(messages, list):
         return messages
     system_messages = [m for m in messages if m.get("role") == "system"]
@@ -440,16 +445,17 @@ def summarize_old_messages(messages):
                             if m.get("content", "").startswith("[РЕЗЮМЕ ПРОШЛОГО]")), "")
     other_system = [m for m in system_messages if not m.get("content", "").startswith("[РЕЗЮМЕ ПРОШЛОГО]")]
     if len(dialogue) <= MAX_MESSAGES_BEFORE_SUMMARY:
-        return other_system + ([{"role": "system", "content": existing_summary}] if existing_summary else []) + dialogue
-    to_summarize = dialogue[:-KEEP_RECENT]
-    recent = dialogue[-KEEP_RECENT:]
+        return messages
+    keep_recent = max(4, min(KEEP_RECENT, 16))
+    to_summarize = dialogue[:-keep_recent]
+    recent = dialogue[-keep_recent:]
     text_to_summarize = "\n".join(f"{m['role']}: {m.get('content','')}" for m in to_summarize if m.get("content"))
     if not text_to_summarize.strip():
-        return other_system + ([{"role": "system", "content": existing_summary}] if existing_summary else []) + dialogue
+        return messages
     archive_input = (existing_summary + "\n\nНОВЫЕ СОБЫТИЯ:\n" if existing_summary else "") + text_to_summarize
     try:
         resp = client.chat.completions.create(
-            model=MODEL,
+            model=SUMMARY_MODEL,
             messages=[{"role": "system", "content": SUMMARY_PROMPT},
                      {"role": "user", "content": f"Материал для обновления памяти:\n{archive_input}\n\nОбнови резюме, сохранив старые важные факты и добавив новые."}],
             temperature=0.2,
@@ -459,6 +465,7 @@ def summarize_old_messages(messages):
             return messages
         return other_system + [{"role": "system", "content": f"[РЕЗЮМЕ ПРОШЛОГО]\n{summary}"}] + recent
     except Exception:
+        app.logger.exception("Campaign summary generation failed")
         return messages
 
 
@@ -550,7 +557,15 @@ def xp_threshold_for_level(level):
 XP_EVENT_RE = re.compile(r"\+\s*(\d+)\s*XP\b", re.IGNORECASE)
 
 
-def message_event_id(message, index):
+def message_event_id(message, index=None):
+    # Stable across history compaction/reindexing; duplicate identical GM messages
+    # with the same XP line are intentionally treated as one event.
+    raw = f"{message.get('role','')}\0{message.get('content','')}"
+    return hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()
+
+
+def legacy_message_event_id(message, index):
+    """Recognize XP IDs created by older builds (they included the message index)."""
     raw = f"{index}\0{message.get('role','')}\0{message.get('content','')}"
     return hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()
 
@@ -575,28 +590,49 @@ def extract_state(messages, current_state):
         if m.get("role") != "assistant":
             continue
         content = m.get("content", "")
-        event_id = message_event_id(m, index)
-        if event_id in current["xp_event_ids"]:
+        event_id = message_event_id(m)
+        if event_id in current["xp_event_ids"] or legacy_message_event_id(m, index) in current["xp_event_ids"]:
             continue
         matches = [int(x) for x in XP_EVENT_RE.findall(content)]
         if matches:
             fresh_events.append((event_id, sum(matches)))
 
-    recent = messages[-14:]
-    dialogue = "\n".join(f"{m['role']}: {m['content']}" for m in recent if m.get("content"))
-    prompt = (f"ТЕКУЩЕЕ СОСТОЯНИЕ:\n{json.dumps(current, ensure_ascii=False)}\n\n"
-              f"ДИАЛОГ:\n{dialogue}\n\nВерни обновлённое состояние JSON."
-              " Не меняй XP, уровень и xp_next; XP рассчитывается отдельно сервером.")
-    try:
-        resp = client.chat.completions.create(
-            model=MODEL,
-            messages=[{"role": "system", "content": STATE_EXTRACT_PROMPT},
-                     {"role": "user", "content": prompt}],
-            temperature=0.1,
-        )
-        new_state = clean_json(resp.choices[0].message.content or "")
-    except Exception:
-        new_state = {}
+    # Keep the expensive state parser off the hot path: run every 3 player turns,
+    # and immediately when the latest GM reply appears to contain a state-changing event.
+    counter = max(0, int(current.get("state_extract_counter", 0) or 0)) + 1
+    current["state_extract_counter"] = counter
+    last_assistant = next((m.get("content", "") for m in reversed(messages)
+                           if m.get("role") == "assistant"), "")
+    event_pattern = re.compile(
+        r"\+\s*\d+\s*XP|\b(?:HP|ХП)\s*\d+|"
+        r"(?:квест\s+(?:заверш[её]н|выполнен)|уровень\s+повышен|"
+        r"добавлено\s+в\s+инвентарь|удалено\s+из\s+инвентаря|"
+        r"получено\s+\d+\s+(?:золот|монет)|потрачено\s+\d+\s+(?:золот|монет)|"
+        r"создан\s+персонаж|лист\s+персонажа)",
+        re.IGNORECASE,
+    )
+    first_character_setup = current.get("name") in (None, "", "Пустой")
+    should_extract = first_character_setup or counter % 3 == 0 or bool(event_pattern.search(last_assistant))
+    new_state = {}
+    if should_extract:
+        recent = messages[-8:]
+        dialogue = "\n".join(f"{m['role']}: {m['content']}" for m in recent if m.get("content"))
+        # Avoid sending the internal cadence counter to the model.
+        model_state = {k: v for k, v in current.items() if k != "state_extract_counter"}
+        prompt = (f"ТЕКУЩЕЕ СОСТОЯНИЕ:\n{json.dumps(model_state, ensure_ascii=False)}\n\n"
+                  f"ДИАЛОГ ПОСЛЕДНИХ ХОДОВ:\n{dialogue}\n\nВерни обновлённое состояние JSON."
+                  " Не меняй XP, уровень и xp_next; XP рассчитывается отдельно сервером.")
+        try:
+            resp = client.chat.completions.create(
+                model=STATE_MODEL,
+                messages=[{"role": "system", "content": STATE_EXTRACT_PROMPT},
+                         {"role": "user", "content": prompt}],
+                temperature=0.1,
+            )
+            new_state = clean_json(resp.choices[0].message.content or "")
+        except Exception:
+            app.logger.exception("Character state extraction failed")
+            new_state = {}
 
     merged = dict(current)
     for k, v in new_state.items():
@@ -654,7 +690,8 @@ def extract_state(messages, current_state):
 
 @app.route("/api/health")
 def api_health():
-    return jsonify({"ok": True, "model": MODEL, "base_url_configured": bool(BASE_URL),
+    return jsonify({"ok": True, "model": MODEL, "state_model": STATE_MODEL,
+                   "summary_model": SUMMARY_MODEL, "base_url_configured": bool(BASE_URL),
                    "provider": PROVIDER})
 
 
@@ -682,9 +719,10 @@ def api_chat():
     if messages[0].get("role") != "system":
         messages = [{"role": "system", "content": SYSTEM_PROMPT}] + messages
     state_context = {k: v for k, v in (game_state.items() if isinstance(game_state, dict) else [])
-                    if k not in ("xp_event_ids",)}
+                    if k not in ("xp_event_ids", "state_extract_counter")}
     messages = messages[:1] + [{"role": "system", "content": "[АКТУАЛЬНОЕ СОСТОЯНИЕ ПЕРСОНАЖА — справочная информация, не меняй числа без игрового события]\n" + json.dumps(state_context, ensure_ascii=False)}] + messages[1:]
-    messages = summarize_old_messages(messages)
+    # History compaction is performed by /api/compact and persisted by the browser.
+    # Never summarize the same uncompressed browser history on every chat request.
 
     def generate():
         try:
@@ -716,6 +754,17 @@ def api_chat():
             yield "\n[Ошибка API: запрос к модели не выполнен. Проверь настройки модели/API и попробуй снова.]"
 
     return Response(generate(), mimetype="text/plain; charset=utf-8")
+
+
+@app.route("/api/compact", methods=["POST"])
+def api_compact():
+    """Compact and return browser history once it crosses the configured threshold."""
+    data = request.get_json(silent=True) or {}
+    messages = data.get("messages") or []
+    if not isinstance(messages, list):
+        return jsonify({"error": "messages must be a list"}), 400
+    compacted = summarize_old_messages(messages)
+    return jsonify({"messages": compacted, "compacted": len(compacted) < len(messages)})
 
 
 @app.route("/api/state", methods=["POST"])

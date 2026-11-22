@@ -375,7 +375,7 @@ const EMPTY_STATE = {
   dc_modifier:0, dc_modifier_reasons:[],
   position:"стоит", cover:"нет",
   weapon_in_hand:"", restrained:false,
-  level_history:[], xp_event_ids:[], level_pending:0
+  level_history:[], xp_event_ids:[], level_pending:0, state_extract_counter:0
 };
 
 const NOTE_TYPES = {
@@ -848,6 +848,23 @@ async function updateState() {
         addMsg('system', `🎉 Доступно повышение уровня: ${state.level} (получено уровней: ${gained}). Обсуди с мастером выбор повышения характеристик и умения.`);
       }
       renderStatus(); persist();
+      // Persist a rolling summary in the browser save so old turns are not resent forever.
+      // This endpoint calls the summarizer only after the threshold is crossed.
+      if (messages.filter(m => m.role === 'user' || m.role === 'assistant').length > 24) {
+        try {
+          const compactRes = await fetch('/api/compact', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({messages})
+          });
+          if (compactRes.ok) {
+            const compactData = await compactRes.json();
+            if (compactData.compacted && Array.isArray(compactData.messages)) {
+              messages = compactData.messages;
+              persist();
+            }
+          }
+        } catch(compactError) { console.warn('History compaction skipped:', compactError); }
+      }
     }
   } catch(e){}
 }
@@ -1496,6 +1513,7 @@ function init() {
     if (!Array.isArray(state.level_history)) state.level_history = [];
     if (!Array.isArray(state.xp_event_ids)) state.xp_event_ids = [];
     if (typeof state.level_pending !== 'number') state.level_pending = 0;
+    if (typeof state.state_extract_counter !== 'number') state.state_extract_counter = 0;
     if (!Array.isArray(state.notes)) state.notes = [];
     if (typeof state.dc_modifier !== 'number') state.dc_modifier = 0;
     if (typeof state.race !== 'string') state.race = '';
