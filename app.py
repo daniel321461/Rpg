@@ -11,18 +11,40 @@ from openai import OpenAI
 
 app = Flask(__name__)
 
-MODEL = os.getenv("OPENAI_MODEL", "qwen2.5:7b")
-BASE_URL = os.getenv("OPENAI_BASE_URL") or None
-API_KEY = os.getenv("OPENAI_API_KEY")
-if not API_KEY and BASE_URL:
-    API_KEY = "ollama"
-if not API_KEY:
-    raise SystemExit("Не задан OPENAI_API_KEY.")
+# Provider configuration. Yandex AI Studio takes priority when its variables are set.
+YANDEX_API_KEY = os.getenv("YANDEX_API_KEY")
+YANDEX_FOLDER_ID = os.getenv("YANDEX_FOLDER_ID")
 
-if BASE_URL:
-    client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
+if YANDEX_API_KEY:
+    if not YANDEX_FOLDER_ID:
+        raise SystemExit("Для Yandex AI Studio нужно задать YANDEX_FOLDER_ID.")
+    MODEL = os.getenv(
+        "YANDEX_MODEL",
+        f"gpt://{YANDEX_FOLDER_ID}/deepseek-v4.1-flash",
+    )
+    BASE_URL = "https://ai.api.cloud.yandex.net/v1"
+    client = OpenAI(
+        api_key=YANDEX_API_KEY,
+        base_url=BASE_URL,
+        project=YANDEX_FOLDER_ID,
+    )
+    PROVIDER = "Yandex AI Studio"
 else:
-    client = OpenAI(api_key=API_KEY)
+    # Backward compatibility: OpenAI-compatible providers and local Ollama.
+    MODEL = os.getenv("OPENAI_MODEL", "qwen2.5:7b")
+    BASE_URL = os.getenv("OPENAI_BASE_URL") or None
+    API_KEY = os.getenv("OPENAI_API_KEY")
+    if not API_KEY and BASE_URL:
+        API_KEY = "ollama"
+    if not API_KEY:
+        raise SystemExit(
+            "Не заданы YANDEX_API_KEY/YANDEX_FOLDER_ID или OPENAI_API_KEY."
+        )
+    if BASE_URL:
+        client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
+    else:
+        client = OpenAI(api_key=API_KEY)
+    PROVIDER = "OpenAI-compatible/local"
 
 BASE_DIR = Path(__file__).resolve().parent
 SAVES_DIR = BASE_DIR / "saves"
@@ -633,7 +655,7 @@ def extract_state(messages, current_state):
 @app.route("/api/health")
 def api_health():
     return jsonify({"ok": True, "model": MODEL, "base_url_configured": bool(BASE_URL),
-                   "provider": "local/compatible" if BASE_URL else "OpenAI-compatible cloud"})
+                   "provider": PROVIDER})
 
 
 @app.route("/")
