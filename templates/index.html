@@ -361,7 +361,7 @@ const modalContent = document.getElementById('modal-content');
 const statusEl = document.getElementById('status');
 
 const LS_KEY = 'rpg_session_v9';
-const AVATAR_KEY = 'rpg_avatar_v1';
+const AVATAR_KEY = 'rpg_avatar_v2';
 const TTS_KEY = 'rpg_tts_v1';
 
 const EMPTY_STATE = {
@@ -431,9 +431,9 @@ const COVER_LABELS = {
 function getPositionInfo(pos) { return POSITION_LABELS[pos] || { icon: '❔', label: pos || '—', mod: 0 }; }
 function getCoverInfo(cov) { return COVER_LABELS[cov] || { icon: '', label: cov || '—', mod: 0 }; }
 
-/* AVATAR — Perchance manual generation + reliable local import.
-   Perchance has no documented public image-generation API, so do not fake an API call.
-   The app prepares/copies the prompt, opens the real generator, then imports the result. */
+/* AVATAR — Perchance manual generation + local import.
+   No automatic third-party image endpoint is called from this application.
+   Perchance is opened in a new tab; the player imports the resulting image. */
 const PERCHANCE_CHARACTER_URL = 'https://perchance.org/ai-character-generator';
 function detectArchetype(st) {
   const cls = (st.class || '').toLowerCase();
@@ -450,40 +450,38 @@ function detectArchetype(st) {
 }
 function getAvatarAppearance(st) {
   if (st.appearance && String(st.appearance).trim()) return String(st.appearance).trim();
-  const firstUser = (messages || []).find(m => m.role === 'user' && m.content && !/^\[\[(БРОСОК|СИСТЕМА)\]\]/.test(m.content));
+  const firstUser = (messages || []).find(m => m.role === 'user' && m.content && !/^\\[\\[(БРОСОК|СИСТЕМА)\\]\\]/.test(m.content));
   return firstUser ? String(firstUser.content).slice(0, 1200).trim() : '';
 }
-// Видимые признаки популярных фэнтезийных рас. Не задаём один общий шаблон
-// «человек с аксессуарами»: у каждой расы должны быть собственные анатомия и силуэт.
 function getRaceVisualTraits(race) {
   const r = String(race || '').toLowerCase().replace(/ё/g, 'е').trim();
   const rules = [
-    [/дракон|драконид|драконорожден|dragonborn/, 'ДРАКОНОИДНАЯ АНАТОМИЯ: голова рептилии/дракона с вытянутой мордой, чешуя по всему лицу и видимым участкам тела, характерные ноздри, гребень или рога, когти; хвост, если он предусмотрен описанием. Не человеческое лицо с накладными рогами.'],
-    [/высш.*эльф|эльф|эльфий|elf/, 'ЭЛЬФИЙСКАЯ АНАТОМИЯ: изящные заострённые уши, нечеловечески утончённые черты лица, лёгкое телосложение и эльфийская пластика. Для тёмного/дроу-эльфа — тёмная кожа и соответствующие волосы/глаза, если это не противоречит описанию; для лесного — природные оттенки и мотивы.'],
-    [/дварф|дворф|карлик|dwarf/, 'ДВАРФИЙСКАЯ АНАТОМИЯ: низкий рост, широкое коренастое телосложение, массивные плечи и кисти, плотные черты лица; борода, если соответствует полу и описанию.'],
-    [/гном|gnome/, 'ГНОМЬЯ АНАТОМИЯ: небольшой рост, компактное телосложение, выразительное лицо, часто крупный нос и живые глаза; не путать с дварфом или ребёнком-человеком.'],
-    [/полурослик|халфлинг|halfling/, 'АНАТОМИЯ ПОЛУРОСЛИКА: невысокий взрослый персонаж с компактным телосложением, слегка заострёнными ушами и характерными большими ступнями, если они видны; не изображать ребёнком.'],
-    [/орк|orc/, 'ОРЧЬЯ АНАТОМИЯ: мощная челюсть, заметные клыки/клыки нижней челюсти, выраженные надбровья, широкое мускулистое телосложение, характерный оттенок кожи согласно описанию.'],
-    [/тифлинг|tiefling/, 'ТИФЛИНГ: явно видимые демонические признаки — рога характерной формы, хвост, необычные глаза и/или цвет кожи; не превращать в обычного человека с маленькими рожками.'],
-    [/аасимар|асимар|aasimar/, 'АСИМАР: явно сверхъестественная небесная внешность — сияющие/светлые глаза, тонкий ореол или световые/пернатые детали, благородные неземные черты; крылья только если указаны или уместны в описании.'],
-    [/гоблин|goblin/, 'ГОБЛИНСКАЯ АНАТОМИЯ: маленькое жилистое тело, крупные заострённые уши, характерные крупные глаза, узкая морда и выраженные зубы; не изображать обычным человеком.'],
-    [/хобгоблин|hobgoblin/, 'ХОБГОБЛИНСКАЯ АНАТОМИЯ: гуманоид с отчётливо гоблинскими чертами лица, заострёнными ушами, выраженной челюстью и воинственной осанкой; обычно более высокий и крепкий, чем гоблин.'],
-    [/кобольд|kobold/, 'КОБОЛЬД: небольшой прямоходящий рептилоид с чешуйчатой драконьей мордой, хвостом, когтями и характерным силуэтом; не человек и не миниатюрный дракон.'],
-    [/ящеролюд|ящер|лизардфолк|lizardfolk/, 'ЯЩЕРОЛЮД: гуманоидная рептилия с чешуйчатой кожей, вытянутой пастью, рептильными глазами, когтями и хвостом; лицо не человеческое.'],
-    [/табакси|tabaxi|кошколюд/, 'ТАБАКСИ: человекоподобная кошка с полностью покрытой мехом мордой, кошачьими ушами, носом, усами, вертикальными зрачками, лапами/когтями и хвостом.'],
-    [/кенку|kenku|воронолюд/, 'КЕНКУ: гуманоидная птица с клювом, перьями, птичьими глазами и когтистыми руками/ногами; отчётливая птичья голова, не человеческое лицо в маске.'],
-    [/голиаф|goliath/, 'ГОЛИАФ: очень высокий и массивный гуманоид с мощной мускулатурой, каменно-серыми или иными указанными оттенками кожи и характерными природными отметинами.'],
-    [/генази|genasi/, 'ГЕНАЗИ: гуманоид с заметными стихийными признаками выбранной стихии (огонь, вода, воздух или земля): соответствующая кожа, волосы, глаза и эффекты; стихию брать из описания, не угадывать произвольно.'],
-    [/тритон|triton|морской народ/, 'ТРИТОН: водный гуманоид с подводными чертами — жаберные щели, перепонки, плавниковые детали, морские оттенки кожи и глаза; признаки должны быть видимы.'],
-    [/фея|фейри|fairy/, 'ФЕЙСКАЯ АНАТОМИЯ: миниатюрный/изящный фейский облик и прозрачные или насекомоподобные крылья, если они соответствуют описанию; не обычный человек с блёстками.'],
-    [/сатир|faun|satyr/, 'САТИР: человеческий торс с козлиными ногами, копытами, небольшими рогами и фейскими чертами; ноги/копыта должны быть видны, если композиция позволяет.'],
-    [/оборотень|ликантроп|werewolf/, 'ОБОРОТЕНЬ: явно выраженные звериные черты или полное звероподобное превращение согласно описанию — шерсть, морда, клыки, когти, уши.'],
-    [/конструкт|варфордж|warforged|голем/, 'ИСКУССТВЕННАЯ/МЕХАНИЧЕСКАЯ АНАТОМИЯ: тело из металла, дерева, камня или иных материалов, видимые сочленения и конструктивные детали; не органический человек в броне.'],
-    [/меняющ.*облик|перевертыш|чейнджлинг|changeling/, 'ЧЕЙНДЖЛИНГ: характерная бледная/перламутровая кожа, гладкие или изменчивые черты лица и необычная внешность; сохранить особенности, указанные игроком.']
+    [/дракон|драконид|драконорожден|dragonborn/, 'ДРАКОНОИДНАЯ АНАТОМИЯ: голова рептилии/дракона с вытянутой мордой, чешуя, ноздри, гребень или рога, когти; хвост, если предусмотрен описанием. Не человеческое лицо с накладными рогами.'],
+    [/высш.*эльф|эльф|эльфий|elf/, 'ЭЛЬФИЙСКАЯ АНАТОМИЯ: изящные заострённые уши, утончённые черты лица, лёгкое телосложение и эльфийская пластика.'],
+    [/дварф|дворф|карлик|dwarf/, 'ДВАРФИЙСКАЯ АНАТОМИЯ: низкий рост, широкое коренастое телосложение, массивные плечи и кисти.'],
+    [/гном|gnome/, 'ГНОМЬЯ АНАТОМИЯ: небольшой рост, компактное телосложение, выразительное лицо; не путать с дварфом или ребёнком-человеком.'],
+    [/полурослик|халфлинг|halfling/, 'АНАТОМИЯ ПОЛУРОСЛИКА: невысокий взрослый персонаж с компактным телосложением и характерными большими ступнями.'],
+    [/орк|orc/, 'ОРЧЬЯ АНАТОМИЯ: мощная челюсть, заметные клыки, выраженные надбровья и широкое мускулистое телосложение.'],
+    [/тифлинг|tiefling/, 'ТИФЛИНГ: явно видимые демонические признаки — рога, хвост, необычные глаза и/или цвет кожи.'],
+    [/аасимар|асимар|aasimar/, 'АСИМАР: сверхъестественная небесная внешность — сияющие глаза, неземные черты, световые или пернатые детали.'],
+    [/гоблин|goblin/, 'ГОБЛИНСКАЯ АНАТОМИЯ: маленькое жилистое тело, крупные заострённые уши, крупные глаза, узкая морда и выраженные зубы.'],
+    [/хобгоблин|hobgoblin/, 'ХОБГОБЛИНСКАЯ АНАТОМИЯ: гоблинские черты лица, заострённые уши, выраженная челюсть; выше и крепче гоблина.'],
+    [/кобольд|kobold/, 'КОБОЛЬД: небольшой прямоходящий рептилоид с чешуйчатой драконьей мордой, хвостом и когтями.'],
+    [/ящеролюд|ящер|лизардфолк|lizardfolk/, 'ЯЩЕРОЛЮД: гуманоидная рептилия с чешуёй, вытянутой пастью, рептильными глазами, когтями и хвостом.'],
+    [/табакси|tabaxi|кошколюд/, 'ТАБАКСИ: кошачья морда, мех, кошачьи уши, нос, усы, вертикальные зрачки, когти и хвост.'],
+    [/кенку|kenku|воронолюд/, 'КЕНКУ: гуманоидная птица с клювом, перьями, птичьими глазами и когтистыми конечностями.'],
+    [/голиаф|goliath/, 'ГОЛИАФ: очень высокий массивный гуманоид с мощной мускулатурой и характерными природными отметинами.'],
+    [/генази|genasi/, 'ГЕНАЗИ: гуманоид с заметными стихийными признаками огня, воды, воздуха или земли согласно описанию.'],
+    [/тритон|triton|морской народ/, 'ТРИТОН: водный гуманоид с жабрами, перепонками, плавниковыми деталями и морскими оттенками.'],
+    [/фея|фейри|fairy/, 'ФЕЙСКАЯ АНАТОМИЯ: изящный фейский облик и прозрачные или насекомоподобные крылья.'],
+    [/сатир|faun|satyr/, 'САТИР: человеческий торс с козлиными ногами, копытами, рогами и фейскими чертами.'],
+    [/оборотень|ликантроп|werewolf/, 'ОБОРОТЕНЬ: выраженные звериные черты — шерсть, морда, клыки, когти и уши.'],
+    [/конструкт|варфордж|warforged|голем/, 'МЕХАНИЧЕСКАЯ АНАТОМИЯ: тело из металла, дерева или камня, видимые сочленения и конструктивные детали.'],
+    [/чейнджлинг|changeling/, 'ЧЕЙНДЖЛИНГ: характерная бледная или перламутровая кожа и необычные изменчивые черты лица.']
   ];
   for (const [pattern, description] of rules) if (pattern.test(r)) return description;
-  if (!r || /человек|human/.test(r)) return 'ЧЕЛОВЕК: обычная человеческая анатомия; индивидуальность передавать чертами лица, телосложением, одеждой и деталями из описания.';
-  return `РАСА «${race}»: внимательно интерпретируй название расы как отдельный биологический/фэнтезийный вид. Изобрази её узнаваемые анатомические признаки, характерные пропорции, кожу/покровы, лицо, уши, глаза, конечности и силуэт. Не подменяй неизвестную расу человеком; если точная анатомия не задана, создай последовательный нечеловеческий дизайн, соответствующий названию, и сохрани его во всём изображении.`;
+  if (!r || /человек|human/.test(r)) return 'ЧЕЛОВЕК: обычная человеческая анатомия.';
+  return `РАСА «${race}»: создай узнаваемую отдельную фэнтезийную анатомию; не подменяй неизвестную расу человеком.`;
 }
 function buildAvatarPrompt(st, appearanceOverride) {
   const appearance = String(appearanceOverride !== undefined ? appearanceOverride : getAvatarAppearance(st)).trim();
@@ -491,30 +489,20 @@ function buildAvatarPrompt(st, appearanceOverride) {
   return [
     'Создай детализированный портрет персонажа для фэнтезийной RPG.',
     `Имя: ${st.name || 'Безымянный'}.`,
-    race ? `РАСА ПЕРСОНАЖА (ОБЯЗАТЕЛЬНО СОБЛЮДАТЬ): ${race}.` : '',
-    race ? getRaceVisualTraits(race) : 'Если раса не указана, следуй точному описанию игрока и не выдумывай вид.',
+    race ? `ОБЯЗАТЕЛЬНАЯ РАСА: ${race}. ${getRaceVisualTraits(race)}` : 'Если раса не указана, следуй описанию игрока.',
     st.class ? `Класс: ${st.class} (${detectArchetype(st)}).` : '',
     st.background ? `Предыстория: ${st.background}.` : '',
-    appearance ? `ТОЧНОЕ ОПИСАНИЕ ВНЕШНОСТИ — следуй ему буквально, не заменяй и не добавляй противоречащие детали: ${appearance}.` : '',
-    'РАСА ВАЖНЕЕ ОБЩИХ ШАБЛОНОВ: анатомия, лицо и силуэт должны позволять определить расу с первого взгляда. Не делай расу просто человеком с костюмом, маской, капюшоном или декоративными аксессуарами. Не смешивай признаки разных рас.',
-    'Сохрани указанные пол, возраст, телосложение, цвет кожи/чешуи/меха/перьев, причёску, цвет глаз, лицо, одежду, броню, оружие и отличительные черты. Не добавляй противоречащих описанию деталей.',
-    'Один персонаж, портрет по грудь, лицо хорошо видно, персонаж в центре кадра, выразительное лицо, детализированная экипировка, качественная fantasy concept art, кинематографический мягкий свет, цельная композиция, без текста, букв и водяных знаков.',
-    'High quality fantasy RPG character portrait. Species/race anatomy is mandatory and must be unmistakable at first glance. Never depict a non-human race as a human wearing a costume. Preserve the exact species silhouette, facial structure, skin/fur/scales/feathers, ears, eyes, limbs, gender, age, clothing, armor and equipment. No race mixing, no generic human face.'
-  ].filter(Boolean).join('\n');
+    appearance ? `ТОЧНОЕ ОПИСАНИЕ: ${appearance}.` : '',
+    'Анатомия, лицо и силуэт должны позволять определить расу с первого взгляда. Не делай нечеловеческую расу человеком в костюме.',
+    'Один персонаж, портрет по грудь, лицо хорошо видно, персонаж в центре кадра, детализированная экипировка, качественная fantasy concept art, без текста и водяных знаков.',
+    'Species/race anatomy is mandatory and unmistakable. Never depict a non-human race as a human wearing a costume.'
+  ].filter(Boolean).join('\\n');
 }
 function cachedAvatarFor(name) {
   try {
     const raw = localStorage.getItem(AVATAR_KEY);
     if (!raw) return null;
     const data = JSON.parse(raw);
-    // Remove legacy portraits that were previously generated by Pollinations.
-    // This prevents an old browser-local cache from making the new build appear
-    // to keep using Pollinations even though the current source has no such call.
-    const imageUrl = String(data && data.url || '');
-    if (/pollinations\.ai/i.test(imageUrl)) {
-      localStorage.removeItem(AVATAR_KEY);
-      return null;
-    }
     if (data.name === name && data.url) return data;
   } catch(e) {
     try { localStorage.removeItem(AVATAR_KEY); } catch(_) {}
@@ -522,19 +510,8 @@ function cachedAvatarFor(name) {
   return null;
 }
 function saveAvatar(name, url, prompt) {
-  try { localStorage.setItem(AVATAR_KEY, JSON.stringify({name, url, prompt: prompt || '', provider:'perchance-import'})); return true; }
+  try { localStorage.setItem(AVATAR_KEY, JSON.stringify({name, url, prompt: prompt || '', provider:'user-import'})); return true; }
   catch(e) { return false; }
-}
-const AVATAR_AUTO_KEY = 'rpg_avatar_auto_v1';
-let avatarGenerationInFlight = false;
-function avatarAutoStatus(name) {
-  try {
-    const data = JSON.parse(localStorage.getItem(AVATAR_AUTO_KEY) || '{}');
-    return data.name === name ? data.status : '';
-  } catch(e) { return ''; }
-}
-function setAvatarAutoStatus(name, status, detail='') {
-  try { localStorage.setItem(AVATAR_AUTO_KEY, JSON.stringify({name, status, detail, updated: Date.now()})); } catch(e) {}
 }
 function maybeGenerateAvatar() {
   if (!state || !state.name || state.name === 'Пустой') return;
@@ -543,66 +520,6 @@ function maybeGenerateAvatar() {
   if (wrap) wrap.innerHTML = cached
     ? `<img src="${cached.url}" alt="${esc(state.name)}">`
     : '<div class="avatar-placeholder">?</div>';
-  // One automatic attempt per character. It runs in the player's browser, never on Railway.
-  if (!cached && !avatarGenerationInFlight && avatarAutoStatus(state.name) !== 'done'
-      && avatarAutoStatus(state.name) !== 'running' && avatarAutoStatus(state.name) !== 'failed') {
-    generateAvatarAutomatically().catch(err => {
-      setAvatarAutoStatus(state.name, 'failed', String(err && err.message || err));
-      console.warn('Perchance avatar generation failed:', err);
-    });
-  }
-}
-async function generateAvatarAutomatically() {
-  if (avatarGenerationInFlight || !state || !state.name || state.name === 'Пустой') return;
-  avatarGenerationInFlight = true;
-  const characterName = state.name;
-  const prompt = buildAvatarPrompt(state);
-  setAvatarAutoStatus(characterName, 'running');
-  const statusElAvatar = document.getElementById('avatar-generation-status');
-  if (statusElAvatar) statusElAvatar.textContent = 'Пробую создать портрет через Perchance прямо в браузере…';
-  try {
-    const result = await new Promise((resolve, reject) => {
-      const id = 'rpg_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2);
-      const params = new URLSearchParams({prompt, format:'json', id});
-      const frame = document.createElement('iframe');
-      frame.title = 'Perchance image generation';
-      frame.style.cssText = 'position:fixed;width:1px;height:1px;opacity:0;pointer-events:none;left:-10px;bottom:-10px';
-      let settled = false;
-      const finish = (fn, value) => {
-        if (settled) return;
-        settled = true;
-        window.removeEventListener('message', onMessage);
-        clearTimeout(timer);
-        frame.remove();
-        fn(value);
-      };
-      const onMessage = event => {
-        if (!/^https?:\/\/(?:[a-z0-9-]+\.)?perchance\.org$/i.test(event.origin)) return;
-        const data = event.data || {};
-        if (data.api !== 'perchance-image-api' || !data.result || data.result.id !== id) return;
-        const r = data.result;
-        if (!r.ok) return finish(reject, new Error(r.error || r.message || r.status || 'Perchance не завершил генерацию'));
-        const image = (r.imageDataUrls && r.imageDataUrls[0]) || r.imageUrl || r.imageURL || r.imageUrls?.[0] || r.imageDownloadUrl || r.url;
-        if (!image || typeof image !== 'string') return finish(reject, new Error('Perchance не вернул изображение в ожидаемом формате'));
-        finish(resolve, image);
-      };
-      window.addEventListener('message', onMessage);
-      const timer = setTimeout(() => finish(reject, new Error('Perchance не ответил за 120 секунд. Можно загрузить портрет вручную.')), 120000);
-      frame.src = 'https://perchance.org/perchance-ai-api?' + params.toString();
-      document.body.appendChild(frame);
-    });
-    if (state.name !== characterName) throw new Error('Персонаж изменился во время генерации');
-    if (!saveAvatar(characterName, result, prompt)) throw new Error('Браузер не смог сохранить изображение (возможно, заполнено хранилище)');
-    setAvatarAutoStatus(characterName, 'done');
-    const wrap = document.querySelector('.avatar-wrap');
-    if (wrap) wrap.innerHTML = `<img src="${result}" alt="${esc(characterName)}">`;
-    if (document.getElementById('avatar-generation-status')) document.getElementById('avatar-generation-status').textContent = 'Портрет создан и установлен автоматически.';
-  } catch (error) {
-    setAvatarAutoStatus(characterName, 'failed', String(error && error.message || error));
-    throw error;
-  } finally {
-    avatarGenerationInFlight = false;
-  }
 }
 async function copyAvatarPrompt(prompt) {
   try { await navigator.clipboard.writeText(prompt); return true; }
@@ -623,7 +540,7 @@ function openAvatarModal() {
     ${imgSrc ? `<img class="avatar-large" src="${imgSrc}" alt="${esc(state.name)}">` : `<div style="text-align:center;padding:12px;color:var(--text-secondary)">Портрет ещё не загружен</div>`}
     <label for="avatar-appearance" style="font-size:13px;color:var(--text-secondary)">Внешность персонажа (можно писать по-русски)</label>
     <textarea id="avatar-appearance" rows="4" style="width:100%;box-sizing:border-box;background:var(--bg-deep);border:1px solid var(--border-subtle);border-radius:8px;padding:10px;color:var(--text-primary);font:14px var(--font-sans);resize:vertical" placeholder="Например: молодая эльфийка с серебряными волосами...">${esc(appearance)}</textarea>
-    <div id="avatar-generation-status" style="font-size:12px;color:var(--text-secondary)">Автоматическая генерация запускается в браузере при создании персонажа. Если Perchance не ответит, можно открыть генератор вручную и загрузить результат.</div>
+    <div id="avatar-generation-status" style="font-size:12px;color:var(--text-secondary)">Автоматическая генерация не используется. Открой Perchance, создай портрет по скопированному промпту и загрузи изображение сюда.</div>
     <button class="btn primary" id="open-perchance-avatar">✨ Повторить генерацию в Perchance</button>
     <button class="btn" id="import-avatar-image">📁 Загрузить портрет вручную</button>
     <input id="avatar-image-file" type="file" accept="image/png,image/jpeg,image/webp" style="display:none">
@@ -636,16 +553,14 @@ function openAvatarModal() {
     const appearanceText = field ? field.value.trim() : '';
     state.appearance = appearanceText; persist();
     const prompt = buildAvatarPrompt(state, appearanceText);
+    const copied = await copyAvatarPrompt(prompt);
     const status = document.getElementById('avatar-generation-status');
-    if (status) status.textContent = 'Запускаю генерацию в браузере…';
-    try {
-      setAvatarAutoStatus(state.name, 'failed', '');
-      await generateAvatarAutomatically();
-      openAvatarModal();
-    } catch (err) {
-      if (status) status.textContent = 'Автоматический способ не сработал: ' + (err.message || err) + '. Можно открыть Perchance вручную.';
-      const copied = await copyAvatarPrompt(prompt);
-      if (copied) window.open(PERCHANCE_CHARACTER_URL, '_blank', 'noopener');
+    if (copied) {
+      window.open(PERCHANCE_CHARACTER_URL, '_blank', 'noopener');
+      if (status) status.textContent = 'Промпт скопирован. Вставь его в Perchance, создай изображение и загрузи результат кнопкой ниже.';
+    } else {
+      if (status) status.textContent = 'Не удалось автоматически скопировать промпт. Выдели и скопируй описание вручную.';
+      window.open(PERCHANCE_CHARACTER_URL, '_blank', 'noopener');
     }
   };
   document.getElementById('import-avatar-image').onclick = () => document.getElementById('avatar-image-file').click();
