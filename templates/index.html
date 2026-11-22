@@ -431,10 +431,10 @@ const COVER_LABELS = {
 function getPositionInfo(pos) { return POSITION_LABELS[pos] || { icon: '❔', label: pos || '—', mod: 0 }; }
 function getCoverInfo(cov) { return COVER_LABELS[cov] || { icon: '', label: cov || '—', mod: 0 }; }
 
-/* AVATAR — Perchance free image generation */
-const PERCHANCE_API_URL = 'https://perchance.org/perchance-ai-api';
+/* AVATAR — Perchance manual generation + reliable local import.
+   Perchance has no documented public image-generation API, so do not fake an API call.
+   The app prepares/copies the prompt, opens the real generator, then imports the result. */
 const PERCHANCE_CHARACTER_URL = 'https://perchance.org/ai-character-generator';
-let avatarGenerationId = 0;
 function detectArchetype(st) {
   const cls = (st.class || '').toLowerCase();
   const clsMap = {
@@ -450,161 +450,219 @@ function detectArchetype(st) {
 }
 function getAvatarAppearance(st) {
   if (st.appearance && String(st.appearance).trim()) return String(st.appearance).trim();
-  // Legacy saves may not yet have the appearance field. Reuse the player's own opening description.
   const firstUser = (messages || []).find(m => m.role === 'user' && m.content && !/^\[\[(БРОСОК|СИСТЕМА)\]\]/.test(m.content));
   return firstUser ? String(firstUser.content).slice(0, 1200).trim() : '';
 }
+// Видимые признаки популярных фэнтезийных рас. Не задаём один общий шаблон
+// «человек с аксессуарами»: у каждой расы должны быть собственные анатомия и силуэт.
+function getRaceVisualTraits(race) {
+  const r = String(race || '').toLowerCase().replace(/ё/g, 'е').trim();
+  const rules = [
+    [/дракон|драконид|драконорожден|dragonborn/, 'ДРАКОНОИДНАЯ АНАТОМИЯ: голова рептилии/дракона с вытянутой мордой, чешуя по всему лицу и видимым участкам тела, характерные ноздри, гребень или рога, когти; хвост, если он предусмотрен описанием. Не человеческое лицо с накладными рогами.'],
+    [/высш.*эльф|эльф|эльфий|elf/, 'ЭЛЬФИЙСКАЯ АНАТОМИЯ: изящные заострённые уши, нечеловечески утончённые черты лица, лёгкое телосложение и эльфийская пластика. Для тёмного/дроу-эльфа — тёмная кожа и соответствующие волосы/глаза, если это не противоречит описанию; для лесного — природные оттенки и мотивы.'],
+    [/дварф|дворф|карлик|dwarf/, 'ДВАРФИЙСКАЯ АНАТОМИЯ: низкий рост, широкое коренастое телосложение, массивные плечи и кисти, плотные черты лица; борода, если соответствует полу и описанию.'],
+    [/гном|gnome/, 'ГНОМЬЯ АНАТОМИЯ: небольшой рост, компактное телосложение, выразительное лицо, часто крупный нос и живые глаза; не путать с дварфом или ребёнком-человеком.'],
+    [/полурослик|халфлинг|halfling/, 'АНАТОМИЯ ПОЛУРОСЛИКА: невысокий взрослый персонаж с компактным телосложением, слегка заострёнными ушами и характерными большими ступнями, если они видны; не изображать ребёнком.'],
+    [/орк|orc/, 'ОРЧЬЯ АНАТОМИЯ: мощная челюсть, заметные клыки/клыки нижней челюсти, выраженные надбровья, широкое мускулистое телосложение, характерный оттенок кожи согласно описанию.'],
+    [/тифлинг|tiefling/, 'ТИФЛИНГ: явно видимые демонические признаки — рога характерной формы, хвост, необычные глаза и/или цвет кожи; не превращать в обычного человека с маленькими рожками.'],
+    [/аасимар|асимар|aasimar/, 'АСИМАР: явно сверхъестественная небесная внешность — сияющие/светлые глаза, тонкий ореол или световые/пернатые детали, благородные неземные черты; крылья только если указаны или уместны в описании.'],
+    [/гоблин|goblin/, 'ГОБЛИНСКАЯ АНАТОМИЯ: маленькое жилистое тело, крупные заострённые уши, характерные крупные глаза, узкая морда и выраженные зубы; не изображать обычным человеком.'],
+    [/хобгоблин|hobgoblin/, 'ХОБГОБЛИНСКАЯ АНАТОМИЯ: гуманоид с отчётливо гоблинскими чертами лица, заострёнными ушами, выраженной челюстью и воинственной осанкой; обычно более высокий и крепкий, чем гоблин.'],
+    [/кобольд|kobold/, 'КОБОЛЬД: небольшой прямоходящий рептилоид с чешуйчатой драконьей мордой, хвостом, когтями и характерным силуэтом; не человек и не миниатюрный дракон.'],
+    [/ящеролюд|ящер|лизардфолк|lizardfolk/, 'ЯЩЕРОЛЮД: гуманоидная рептилия с чешуйчатой кожей, вытянутой пастью, рептильными глазами, когтями и хвостом; лицо не человеческое.'],
+    [/табакси|tabaxi|кошколюд/, 'ТАБАКСИ: человекоподобная кошка с полностью покрытой мехом мордой, кошачьими ушами, носом, усами, вертикальными зрачками, лапами/когтями и хвостом.'],
+    [/кенку|kenku|воронолюд/, 'КЕНКУ: гуманоидная птица с клювом, перьями, птичьими глазами и когтистыми руками/ногами; отчётливая птичья голова, не человеческое лицо в маске.'],
+    [/голиаф|goliath/, 'ГОЛИАФ: очень высокий и массивный гуманоид с мощной мускулатурой, каменно-серыми или иными указанными оттенками кожи и характерными природными отметинами.'],
+    [/генази|genasi/, 'ГЕНАЗИ: гуманоид с заметными стихийными признаками выбранной стихии (огонь, вода, воздух или земля): соответствующая кожа, волосы, глаза и эффекты; стихию брать из описания, не угадывать произвольно.'],
+    [/тритон|triton|морской народ/, 'ТРИТОН: водный гуманоид с подводными чертами — жаберные щели, перепонки, плавниковые детали, морские оттенки кожи и глаза; признаки должны быть видимы.'],
+    [/фея|фейри|fairy/, 'ФЕЙСКАЯ АНАТОМИЯ: миниатюрный/изящный фейский облик и прозрачные или насекомоподобные крылья, если они соответствуют описанию; не обычный человек с блёстками.'],
+    [/сатир|faun|satyr/, 'САТИР: человеческий торс с козлиными ногами, копытами, небольшими рогами и фейскими чертами; ноги/копыта должны быть видны, если композиция позволяет.'],
+    [/оборотень|ликантроп|werewolf/, 'ОБОРОТЕНЬ: явно выраженные звериные черты или полное звероподобное превращение согласно описанию — шерсть, морда, клыки, когти, уши.'],
+    [/конструкт|варфордж|warforged|голем/, 'ИСКУССТВЕННАЯ/МЕХАНИЧЕСКАЯ АНАТОМИЯ: тело из металла, дерева, камня или иных материалов, видимые сочленения и конструктивные детали; не органический человек в броне.'],
+    [/меняющ.*облик|перевертыш|чейнджлинг|changeling/, 'ЧЕЙНДЖЛИНГ: характерная бледная/перламутровая кожа, гладкие или изменчивые черты лица и необычная внешность; сохранить особенности, указанные игроком.']
+  ];
+  for (const [pattern, description] of rules) if (pattern.test(r)) return description;
+  if (!r || /человек|human/.test(r)) return 'ЧЕЛОВЕК: обычная человеческая анатомия; индивидуальность передавать чертами лица, телосложением, одеждой и деталями из описания.';
+  return `РАСА «${race}»: внимательно интерпретируй название расы как отдельный биологический/фэнтезийный вид. Изобрази её узнаваемые анатомические признаки, характерные пропорции, кожу/покровы, лицо, уши, глаза, конечности и силуэт. Не подменяй неизвестную расу человеком; если точная анатомия не задана, создай последовательный нечеловеческий дизайн, соответствующий названию, и сохрани его во всём изображении.`;
+}
 function buildAvatarPrompt(st, appearanceOverride) {
   const appearance = String(appearanceOverride !== undefined ? appearanceOverride : getAvatarAppearance(st)).trim();
-  const parts = [
-    'Портрет игрового персонажа для фэнтезийной RPG.',
+  const race = String(st.race || '').trim();
+  return [
+    'Создай детализированный портрет персонажа для фэнтезийной RPG.',
     `Имя: ${st.name || 'Безымянный'}.`,
-    st.race ? `Раса: ${st.race}.` : '',
+    race ? `РАСА ПЕРСОНАЖА (ОБЯЗАТЕЛЬНО СОБЛЮДАТЬ): ${race}.` : '',
+    race ? getRaceVisualTraits(race) : 'Если раса не указана, следуй точному описанию игрока и не выдумывай вид.',
     st.class ? `Класс: ${st.class} (${detectArchetype(st)}).` : '',
     st.background ? `Предыстория: ${st.background}.` : '',
-    appearance ? `ТОЧНОЕ ОПИСАНИЕ ВНЕШНОСТИ ПЕРСОНАЖА — следуй ему буквально, не заменяй и не добавляй противоречащие детали: ${appearance}.` : '',
-    'Сохрани указанную расу, пол, возраст, телосложение, цвет кожи, причёску, цвет глаз, одежду, броню, оружие и отличительные черты. Если деталь не указана, выбери сдержанный вариант, подходящий миру и классу.',
-    'Один персонаж, плечевой портрет по грудь, лицо хорошо видно, персонаж в центре кадра, выразительное лицо, детализированная одежда и экипировка, профессиональная иллюстрация персонажа для настольной RPG, реалистичная fantasy concept art, кинематографический мягкий свет, аккуратная композиция, без текста, без букв, без водяных знаков.'
-  ].filter(Boolean);
-  // Keep the user's Russian description intact; add English rendering cues for better compatibility.
-  return parts.join('\n') + '\n\nHigh quality fantasy RPG character portrait, detailed digital painting, faithful to the exact character description, centered bust portrait, clear face, coherent anatomy, intricate costume, no text, no watermark.';
+    appearance ? `ТОЧНОЕ ОПИСАНИЕ ВНЕШНОСТИ — следуй ему буквально, не заменяй и не добавляй противоречащие детали: ${appearance}.` : '',
+    'РАСА ВАЖНЕЕ ОБЩИХ ШАБЛОНОВ: анатомия, лицо и силуэт должны позволять определить расу с первого взгляда. Не делай расу просто человеком с костюмом, маской, капюшоном или декоративными аксессуарами. Не смешивай признаки разных рас.',
+    'Сохрани указанные пол, возраст, телосложение, цвет кожи/чешуи/меха/перьев, причёску, цвет глаз, лицо, одежду, броню, оружие и отличительные черты. Не добавляй противоречащих описанию деталей.',
+    'Один персонаж, портрет по грудь, лицо хорошо видно, персонаж в центре кадра, выразительное лицо, детализированная экипировка, качественная fantasy concept art, кинематографический мягкий свет, цельная композиция, без текста, букв и водяных знаков.',
+    'High quality fantasy RPG character portrait. Species/race anatomy is mandatory and must be unmistakable at first glance. Never depict a non-human race as a human wearing a costume. Preserve the exact species silhouette, facial structure, skin/fur/scales/feathers, ears, eyes, limbs, gender, age, clothing, armor and equipment. No race mixing, no generic human face.'
+  ].filter(Boolean).join('\n');
 }
 function cachedAvatarFor(name) {
-  try {
-    const raw = localStorage.getItem(AVATAR_KEY);
-    if (!raw) return null;
-    const data = JSON.parse(raw);
-    if (data.name === name && data.url) return data;
-  } catch(e){}
+  try { const raw = localStorage.getItem(AVATAR_KEY); if (!raw) return null; const data = JSON.parse(raw); if (data.name === name && data.url) return data; } catch(e){}
   return null;
 }
 function saveAvatar(name, url, prompt) {
-  try { localStorage.setItem(AVATAR_KEY, JSON.stringify({name, url, prompt: prompt || '', provider:'perchance'})); } catch(e){}
+  try { localStorage.setItem(AVATAR_KEY, JSON.stringify({name, url, prompt: prompt || '', provider:'perchance-import'})); return true; }
+  catch(e) { return false; }
 }
-function perchanceGenerateImage(prompt) {
-  return new Promise((resolve, reject) => {
-    const id = 'rpg_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 9);
-    const params = new URLSearchParams({
-      prompt, format: 'json', id,
-      resolution: '512x512', guidanceScale: '8',
-      negativePrompt: 'blurry, low quality, distorted face, bad anatomy, extra fingers, extra limbs, duplicate person, cropped head, text, watermark, logo'
-    });
-    const frame = document.createElement('iframe');
-    frame.title = 'Perchance avatar generation';
-    frame.style.cssText = 'position:fixed;width:1px;height:1px;left:-10px;top:-10px;opacity:0;pointer-events:none;border:0';
-    let settled = false;
-    const finish = (fn, value) => {
-      if (settled) return;
-      settled = true;
-      window.removeEventListener('message', onMessage);
-      clearTimeout(timer);
-      frame.remove();
-      fn(value);
-    };
-    const onMessage = (event) => {
-      if (event.source !== frame.contentWindow) return;
-      if (event.origin !== 'https://perchance.org' && !/^https:\/\/([a-z0-9-]+\.)*perchance\.org$/.test(event.origin)) return;
-      const data = event.data || {};
-      if (data.api !== 'perchance-image-api' || !data.result || data.result.id !== id) return;
-      if (data.result.ok && (data.result.url || data.result.dataUrl)) finish(resolve, data.result.url || data.result.dataUrl);
-      else finish(reject, new Error(data.result.error || 'Perchance не смог создать изображение'));
-    };
-    const timer = setTimeout(() => finish(reject, new Error('Perchance не ответил за 120 секунд. Попробуй ещё раз или открой генератор вручную.')), 120000);
-    window.addEventListener('message', onMessage);
-    frame.src = PERCHANCE_API_URL + '?' + params.toString();
-    document.body.appendChild(frame);
-  });
-}
-function avatarFallback(prompt) {
-  // A reliable fallback that does not charge Yandex tokens; user can still open Perchance manually.
-  const url = PERCHANCE_CHARACTER_URL;
-  return url + (prompt ? '?prompt=' + encodeURIComponent(prompt) : '');
-}
-async function generateAvatar(force, appearanceOverride) {
-  if (!state || !state.name || state.name === 'Пустой') return;
-  const wrap = document.querySelector('.avatar-wrap');
-  if (!wrap) return;
-  if (!force) {
-    const cached = cachedAvatarFor(state.name);
-    if (cached) { wrap.innerHTML = `<img src="${cached.url}" alt="${esc(state.name)}">`; return; }
-  }
-  const generationId = ++avatarGenerationId;
-  const prompt = buildAvatarPrompt(state, appearanceOverride);
-  wrap.innerHTML = '<div class="avatar-placeholder">…</div>';
-  wrap.classList.add('loading');
+const AVATAR_AUTO_KEY = 'rpg_avatar_auto_v1';
+let avatarGenerationInFlight = false;
+function avatarAutoStatus(name) {
   try {
-    const url = await perchanceGenerateImage(prompt);
-    if (generationId !== avatarGenerationId) return;
-    const img = new Image();
-    img.onload = () => {
-      if (generationId !== avatarGenerationId) return;
-      wrap.classList.remove('loading');
-      wrap.innerHTML = `<img src="${url}" alt="${esc(state.name)}">`;
-      saveAvatar(state.name, url, prompt);
-      if (document.getElementById('avatar-generation-status')) document.getElementById('avatar-generation-status').textContent = 'Портрет создан в Perchance.';
-    };
-    img.onerror = () => {
-      if (generationId !== avatarGenerationId) return;
-      wrap.classList.remove('loading');
-      wrap.innerHTML = '<div class="avatar-placeholder">?</div>';
-      if (document.getElementById('avatar-generation-status')) document.getElementById('avatar-generation-status').textContent = 'Perchance вернул ссылку, но изображение не загрузилось. Открой генератор вручную.';
-    };
-    img.src = url;
-  } catch (e) {
-    if (generationId !== avatarGenerationId) return;
-    wrap.classList.remove('loading');
-    wrap.innerHTML = '<div class="avatar-placeholder">?</div>';
-    const status = document.getElementById('avatar-generation-status');
-    if (status) status.textContent = 'Автогенерация не сработала: ' + e.message;
-    addMsg('system', 'Не удалось автоматически получить портрет из Perchance. Можно открыть генератор и вставить подготовленное описание.');
-  }
+    const data = JSON.parse(localStorage.getItem(AVATAR_AUTO_KEY) || '{}');
+    return data.name === name ? data.status : '';
+  } catch(e) { return ''; }
+}
+function setAvatarAutoStatus(name, status, detail='') {
+  try { localStorage.setItem(AVATAR_AUTO_KEY, JSON.stringify({name, status, detail, updated: Date.now()})); } catch(e) {}
 }
 function maybeGenerateAvatar() {
   if (!state || !state.name || state.name === 'Пустой') return;
-  const cached = cachedAvatarFor(state.name);
   const wrap = document.querySelector('.avatar-wrap');
-  if (!wrap) return;
-  if (cached) { wrap.innerHTML = `<img src="${cached.url}" alt="${esc(state.name)}">`; }
-  else { generateAvatar(false); }
+  const cached = cachedAvatarFor(state.name);
+  if (wrap) wrap.innerHTML = cached
+    ? `<img src="${cached.url}" alt="${esc(state.name)}">`
+    : '<div class="avatar-placeholder">?</div>';
+  // One automatic attempt per character. It runs in the player's browser, never on Railway.
+  if (!cached && !avatarGenerationInFlight && avatarAutoStatus(state.name) !== 'done'
+      && avatarAutoStatus(state.name) !== 'running' && avatarAutoStatus(state.name) !== 'failed') {
+    generateAvatarAutomatically().catch(err => {
+      setAvatarAutoStatus(state.name, 'failed', String(err && err.message || err));
+      console.warn('Perchance avatar generation failed:', err);
+    });
+  }
+}
+async function generateAvatarAutomatically() {
+  if (avatarGenerationInFlight || !state || !state.name || state.name === 'Пустой') return;
+  avatarGenerationInFlight = true;
+  const characterName = state.name;
+  const prompt = buildAvatarPrompt(state);
+  setAvatarAutoStatus(characterName, 'running');
+  const statusElAvatar = document.getElementById('avatar-generation-status');
+  if (statusElAvatar) statusElAvatar.textContent = 'Пробую создать портрет через Perchance прямо в браузере…';
+  try {
+    const result = await new Promise((resolve, reject) => {
+      const id = 'rpg_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2);
+      const params = new URLSearchParams({prompt, format:'json', id});
+      const frame = document.createElement('iframe');
+      frame.title = 'Perchance image generation';
+      frame.style.cssText = 'position:fixed;width:1px;height:1px;opacity:0;pointer-events:none;left:-10px;bottom:-10px';
+      let settled = false;
+      const finish = (fn, value) => {
+        if (settled) return;
+        settled = true;
+        window.removeEventListener('message', onMessage);
+        clearTimeout(timer);
+        frame.remove();
+        fn(value);
+      };
+      const onMessage = event => {
+        if (!/^https?:\/\/(?:[a-z0-9-]+\.)?perchance\.org$/i.test(event.origin)) return;
+        const data = event.data || {};
+        if (data.api !== 'perchance-image-api' || !data.result || data.result.id !== id) return;
+        const r = data.result;
+        if (!r.ok) return finish(reject, new Error(r.error || r.message || r.status || 'Perchance не завершил генерацию'));
+        const image = (r.imageDataUrls && r.imageDataUrls[0]) || r.imageUrl || r.imageURL || r.imageUrls?.[0] || r.imageDownloadUrl || r.url;
+        if (!image || typeof image !== 'string') return finish(reject, new Error('Perchance не вернул изображение в ожидаемом формате'));
+        finish(resolve, image);
+      };
+      window.addEventListener('message', onMessage);
+      const timer = setTimeout(() => finish(reject, new Error('Perchance не ответил за 120 секунд. Можно загрузить портрет вручную.')), 120000);
+      frame.src = 'https://perchance.org/perchance-ai-api?' + params.toString();
+      document.body.appendChild(frame);
+    });
+    if (state.name !== characterName) throw new Error('Персонаж изменился во время генерации');
+    if (!saveAvatar(characterName, result, prompt)) throw new Error('Браузер не смог сохранить изображение (возможно, заполнено хранилище)');
+    setAvatarAutoStatus(characterName, 'done');
+    const wrap = document.querySelector('.avatar-wrap');
+    if (wrap) wrap.innerHTML = `<img src="${result}" alt="${esc(characterName)}">`;
+    if (document.getElementById('avatar-generation-status')) document.getElementById('avatar-generation-status').textContent = 'Портрет создан и установлен автоматически.';
+  } catch (error) {
+    setAvatarAutoStatus(characterName, 'failed', String(error && error.message || error));
+    throw error;
+  } finally {
+    avatarGenerationInFlight = false;
+  }
+}
+async function copyAvatarPrompt(prompt) {
+  try { await navigator.clipboard.writeText(prompt); return true; }
+  catch(e) {
+    const ta = document.createElement('textarea'); ta.value = prompt;
+    ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta);
+    ta.select(); let ok = false; try { ok = document.execCommand('copy'); } catch(_) {}
+    ta.remove(); return ok;
+  }
 }
 function openAvatarModal() {
-  if (!state || !state.name || state.name === 'Пустой') {
-    addMsg('system', 'Имя персонажа ещё не определено. Сначала опишите персонажа мастеру.');
-    return;
-  }
+  if (!state || !state.name || state.name === 'Пустой') { addMsg('system', 'Имя персонажа ещё не определено. Сначала опишите персонажа мастеру.'); return; }
   const cached = cachedAvatarFor(state.name);
   const imgSrc = cached ? cached.url : '';
   const appearance = getAvatarAppearance(state);
-  const prompt = buildAvatarPrompt(state, appearance);
   modalContent.innerHTML = `
     <h3>🖼 Портрет: ${esc(state.name)}</h3>
-    ${imgSrc ? `<img class="avatar-large" src="${imgSrc}" alt="${esc(state.name)}">` : `<div style="text-align:center;padding:12px;color:var(--text-secondary)">Портрет ещё не создан</div>`}
+    ${imgSrc ? `<img class="avatar-large" src="${imgSrc}" alt="${esc(state.name)}">` : `<div style="text-align:center;padding:12px;color:var(--text-secondary)">Портрет ещё не загружен</div>`}
     <label for="avatar-appearance" style="font-size:13px;color:var(--text-secondary)">Внешность персонажа (можно писать по-русски)</label>
-    <textarea id="avatar-appearance" rows="4" style="width:100%;box-sizing:border-box;background:var(--bg-deep);border:1px solid var(--border-subtle);border-radius:8px;padding:10px;color:var(--text-primary);font:14px var(--font-sans);resize:vertical" placeholder="Например: молодая эльфийка с серебряными волосами до пояса, зелёными глазами, бледной кожей, шрамом на левой щеке; тёмно-зелёный кожаный плащ и два кинжала.">${esc(appearance)}</textarea>
-    <div id="avatar-generation-status" style="font-size:12px;color:var(--text-secondary)">Perchance — бесплатный генератор. Русское описание сохраняется и передаётся без удаления деталей.</div>
-    <button class="btn primary" id="regen-avatar">✨ Создать портрет в Perchance</button>
-    <button class="btn" id="open-perchance-avatar">↗ Открыть Perchance с описанием</button>
+    <textarea id="avatar-appearance" rows="4" style="width:100%;box-sizing:border-box;background:var(--bg-deep);border:1px solid var(--border-subtle);border-radius:8px;padding:10px;color:var(--text-primary);font:14px var(--font-sans);resize:vertical" placeholder="Например: молодая эльфийка с серебряными волосами...">${esc(appearance)}</textarea>
+    <div id="avatar-generation-status" style="font-size:12px;color:var(--text-secondary)">Автоматическая генерация запускается в браузере при создании персонажа. Если Perchance не ответит, можно открыть генератор вручную и загрузить результат.</div>
+    <button class="btn primary" id="open-perchance-avatar">✨ Повторить генерацию в Perchance</button>
+    <button class="btn" id="import-avatar-image">📁 Загрузить портрет вручную</button>
+    <input id="avatar-image-file" type="file" accept="image/png,image/jpeg,image/webp" style="display:none">
+    <button class="btn" id="remove-avatar-image">Удалить текущий портрет</button>
     <button class="btn" onclick="document.getElementById('modal').classList.remove('open')">Закрыть</button>
   `;
   modalEl.classList.add('open');
-  document.getElementById('regen-avatar').onclick = async () => {
-    const field = document.getElementById('avatar-appearance');
-    const newAppearance = field ? field.value.trim() : '';
-    state.appearance = newAppearance;
-    persist();
-    localStorage.removeItem(AVATAR_KEY);
-    const status = document.getElementById('avatar-generation-status');
-    if (status) status.textContent = 'Создаю портрет в Perchance… Обычно это занимает некоторое время.';
-    modalEl.classList.remove('open');
-    await generateAvatar(true, newAppearance);
-  };
   document.getElementById('open-perchance-avatar').onclick = async () => {
     const field = document.getElementById('avatar-appearance');
-    const text = buildAvatarPrompt(state, field ? field.value.trim() : '');
-    try { await navigator.clipboard.writeText(text); } catch(e) {}
-    window.open(PERCHANCE_CHARACTER_URL, '_blank', 'noopener');
+    const appearanceText = field ? field.value.trim() : '';
+    state.appearance = appearanceText; persist();
+    const prompt = buildAvatarPrompt(state, appearanceText);
     const status = document.getElementById('avatar-generation-status');
-    if (status) status.textContent = 'Описание скопировано. Вставь его в поле Description на странице Perchance.';
+    if (status) status.textContent = 'Запускаю генерацию в браузере…';
+    try {
+      setAvatarAutoStatus(state.name, 'failed', '');
+      await generateAvatarAutomatically();
+      openAvatarModal();
+    } catch (err) {
+      if (status) status.textContent = 'Автоматический способ не сработал: ' + (err.message || err) + '. Можно открыть Perchance вручную.';
+      const copied = await copyAvatarPrompt(prompt);
+      if (copied) window.open(PERCHANCE_CHARACTER_URL, '_blank', 'noopener');
+    }
+  };
+  document.getElementById('import-avatar-image').onclick = () => document.getElementById('avatar-image-file').click();
+  document.getElementById('avatar-image-file').onchange = async (ev) => {
+    const file = ev.target.files && ev.target.files[0]; if (!file) return;
+    if (!file.type.startsWith('image/')) { alert('Выбери файл изображения.'); return; }
+    const status = document.getElementById('avatar-generation-status'); if (status) status.textContent = 'Обрабатываю изображение…';
+    try {
+      const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader(); reader.onerror = reject;
+        reader.onload = () => {
+          const img = new Image(); img.onerror = reject;
+          img.onload = () => {
+            const max = 768, scale = Math.min(1, max / Math.max(img.width, img.height));
+            const canvas = document.createElement('canvas'); canvas.width = Math.max(1, Math.round(img.width * scale)); canvas.height = Math.max(1, Math.round(img.height * scale));
+            const ctx = canvas.getContext('2d'); ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            resolve(canvas.toDataURL('image/jpeg', 0.84));
+          };
+          img.src = reader.result;
+        }; reader.readAsDataURL(file);
+      });
+      const prompt = buildAvatarPrompt(state, document.getElementById('avatar-appearance')?.value || '');
+      if (!saveAvatar(state.name, dataUrl, prompt)) throw new Error('Не удалось сохранить изображение. Возможно, оно слишком большое.');
+      const wrap = document.querySelector('.avatar-wrap'); if (wrap) wrap.innerHTML = `<img src="${dataUrl}" alt="${esc(state.name)}">`;
+      openAvatarModal();
+      const st = document.getElementById('avatar-generation-status'); if (st) st.textContent = 'Портрет сохранён в браузере и установлен персонажу.';
+    } catch(err) { if (status) status.textContent = 'Ошибка загрузки: ' + (err.message || 'не удалось обработать изображение'); }
+  };
+  document.getElementById('remove-avatar-image').onclick = () => {
+    try { localStorage.removeItem(AVATAR_KEY); } catch(e) {}
+    const wrap = document.querySelector('.avatar-wrap'); if (wrap) wrap.innerHTML = '<div class="avatar-placeholder">?</div>';
+    openAvatarModal();
   };
 }
 
@@ -1392,7 +1450,7 @@ async function manageSaves() {
 function doReset() {
   if (!confirm('Начать новую игру? Текущая история будет потеряна.')) return;
   messages = []; state = {...EMPTY_STATE};
-  try { localStorage.removeItem(AVATAR_KEY); } catch(e){}
+  try { localStorage.removeItem(AVATAR_KEY); localStorage.removeItem(AVATAR_AUTO_KEY); } catch(e){}
   ttsStop();
   persist(); chatEl.innerHTML = ''; renderStatus(); showIntro();
 }
@@ -1437,7 +1495,7 @@ function renderWorlds() {
       drawerEl.classList.remove('open');
       drawerBg.classList.remove('open');
       messages = []; state = {...EMPTY_STATE};
-      try { localStorage.removeItem(AVATAR_KEY); } catch(e){}
+      try { localStorage.removeItem(AVATAR_KEY); localStorage.removeItem(AVATAR_AUTO_KEY); } catch(e){}
       ttsStop();
       chatEl.innerHTML = '';
       renderStatus();
