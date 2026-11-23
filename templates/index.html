@@ -344,13 +344,17 @@
     <button class="btn" data-action="manage-saves">🗂 Управление сохранениями</button>
     <button class="btn" data-action="reset">✨ Новая игра</button>
     <button class="btn" data-action="help">❓ Справка</button>
+    <button class="btn" data-action="logout">🔒 Сменить пользователя</button>
   </div>
 </aside>
 
 <div id="modal"><div class="modal-content" id="modal-content"></div></div>
 
 <script>
-let messages = [], state = null, busy = false;
+let messages = [], state = null, memory = {}, busy = false;
+let authUser = 'owner', authToken = '';
+const AUTH_KEY = 'rpg_access_v1';
+
 const chatEl = document.getElementById('chat');
 const inputEl = document.getElementById('input');
 const sendBtn = document.getElementById('send-btn');
@@ -360,7 +364,7 @@ const modalEl = document.getElementById('modal');
 const modalContent = document.getElementById('modal-content');
 const statusEl = document.getElementById('status');
 
-const LS_KEY = 'rpg_session_v9';
+const LS_KEY = 'rpg_session_v10';
 const AVATAR_KEY = 'rpg_avatar_v1';
 const TTS_KEY = 'rpg_tts_v1';
 
@@ -396,10 +400,14 @@ const READY_WORLDS = [
   { id: 'litrpg_apocalypse', name: 'LitRPG: Система', desc: 'Земля после Системы. Монстры, уровни, прокачка.', prompt: 'Мир: LitRPG. Система пришла на Землю. Я — обычный человек с интерфейсом уровня и характеристик. Начни с первой Системы и первого монстра.' }
 ];
 
-function persist() { try { localStorage.setItem(LS_KEY, JSON.stringify({messages, state})); } catch(e){} }
+// Local campaigns are isolated between authenticated users in the same browser.
+function persist() {
+  try { localStorage.setItem(LS_KEY + '_' + authUser, JSON.stringify({messages, state, memory})); } catch(e){}
+}
 function restore() {
   try {
-    const r = localStorage.getItem(LS_KEY);
+    const r = localStorage.getItem(LS_KEY + '_' + authUser) ||
+              (authUser === 'owner' ? localStorage.getItem('rpg_session_v9') : null);
     if (!r) return null;
     const d = JSON.parse(r);
     if (d && Array.isArray(d.messages)) return d;
@@ -408,6 +416,85 @@ function restore() {
 }
 function esc(s) {
   return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+/* AUTH: tokens stay in sessionStorage; no token ever enters the save or URL. */
+function authHeaders() {
+  return {'Authorization': 'Bearer ' + authToken, 'X-RPG-User': authUser};
+}
+async function checkAuth(user, token) {
+  try {
+    const response = await fetch('/api/auth/check', {
+      headers: {'Authorization': 'Bearer ' + token, 'X-RPG-User': user},
+      cache: 'no-store'
+    });
+    if (!response.ok) return null;
+    const data = await response.json();
+    return data.user || null;
+  } catch (e) { return null; }
+}
+async function showLogin() {
+  modalContent.innerHTML = `<h3>🔒 Вход в RPG-мастер</h3>
+    <p style="color:var(--text-secondary)">Введите имя и секретный ключ из переменных Railway. Для одного владельца имя: owner.</p>
+    <label for="login-user">Пользователь</label>
+    <input id="login-user" type="text" autocomplete="username" value="owner" maxlength="48" style="width:100%;margin:8px 0;padding:10px">
+    <label for="login-token">Секретный ключ</label>
+    <input id="login-token" type="password" autocomplete="current-password" style="width:100%;margin:8px 0;padding:10px">
+    <div id="login-error" style="color:#e57373;min-height:20px;font-size:13px"></div>
+    <button class="btn primary" id="login-submit" style="width:100%">Войти</button>`;
+  modalEl.classList.add('open');
+  return new Promise(resolve => {
+    const button = document.getElementById('login-submit');
+    const tokenBox = document.getElementById('login-token');
+    const usernameBox = document.getElementById('login-user');
+    const error = document.getElementById('login-error');
+    async function submit() {
+      const user = usernameBox.value.trim() || 'owner', token = tokenBox.value;
+      button.disabled = true;
+      error.textContent = 'Проверяем доступ…';
+      const verifiedUser = await checkAuth(user, token);
+      if (verifiedUser) {
+        authUser = verifiedUser; authToken = token;
+        try { sessionStorage.setItem(AUTH_KEY, JSON.stringify({user: authUser, token: authToken})); } catch(e){}
+        modalEl.classList.remove('open'); resolve(true);
+      } else {
+        error.textContent = 'Неверный ключ или нет соединения с сервером.';
+        button.disabled = false;
+      }
+    }
+    button.onclick = submit;
+    tokenBox.onkeydown = e => { if (e.key === 'Enter') submit(); };
+    tokenBox.focus();
+  });
+}
+async function ensureAuth() {
+  let saved;
+  try { saved = JSON.parse(sessionStorage.getItem(AUTH_KEY) || 'null'); } catch(e){}
+  if (saved && saved.user && typeof saved.token === 'string') {
+    const user = await checkAuth(saved.user, saved.token);
+    if (user) { authUser = user; authToken = saved.token; return true; }
+  }
+  // Development-only localhost mode may not require credentials.
+  const unauthenticatedUser = await checkAuth('owner', '');
+  if (unauthenticatedUser) { authUser = unauthenticatedUser; authToken = ''; return true; }
+  return showLogin();
+}
+async function apiFetch(url, options={}) {
+  const makeRequest = () => fetch(url, {
+    ...options, headers: {...(options.headers || {}), ...authHeaders()}, cache: 'no-store'
+  });
+  let response = await makeRequest();
+  if (response.status === 401) {
+    try { sessionStorage.removeItem(AUTH_KEY); } catch(e){}
+    const previousUser = authUser;
+    await showLogin();
+    if (authUser !== previousUser) {
+      location.reload();
+      throw new Error('Пользователь изменён, страница перезагружается');
+    }
+    response = await makeRequest();
+  }
+  return response;
 }
 
 /* POSITION / COVER */
@@ -460,7 +547,7 @@ function buildAvatarPrompt(st) {
 }
 function cachedAvatarFor(name) {
   try {
-    const raw = localStorage.getItem(AVATAR_KEY);
+    const raw = localStorage.getItem(AVATAR_KEY + '_' + authUser);
     if (!raw) return null;
     const data = JSON.parse(raw);
     if (data.name === name && data.url) return data;
@@ -468,7 +555,7 @@ function cachedAvatarFor(name) {
   return null;
 }
 function saveAvatar(name, url) {
-  try { localStorage.setItem(AVATAR_KEY, JSON.stringify({name, url})); } catch(e){}
+  try { localStorage.setItem(AVATAR_KEY + '_' + authUser, JSON.stringify({name, url})); } catch(e){}
 }
 function generateAvatar(force) {
   if (!state || !state.name || state.name === 'Пустой') return;
@@ -521,7 +608,7 @@ function openAvatarModal() {
   `;
   modalEl.classList.add('open');
   document.getElementById('regen-avatar').onclick = () => {
-    localStorage.removeItem(AVATAR_KEY);
+    localStorage.removeItem(AVATAR_KEY + '_' + authUser);
     modalEl.classList.remove('open');
     generateAvatar(true);
   };
@@ -789,10 +876,11 @@ async function callAI(msgs) {
   md.className = 'msg master typing-indicator';
   chatEl.appendChild(md); scrollBottom();
   let full = '';
+  let streamFailed = false;
   try {
-    const res = await fetch('/api/chat', {
+    const res = await apiFetch('/api/chat', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({messages: msgs, state})
+      body: JSON.stringify({messages: msgs, state, memory})
     });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const reader = res.body.getReader(); const dec = new TextDecoder();
@@ -807,15 +895,17 @@ async function callAI(msgs) {
     const t = dec.decode();
     if (t) { full += t; md.textContent = full; scrollBottom(); }
   } catch(e) {
+    streamFailed = true;
     md.classList.remove('typing-indicator');
-    md.textContent = (full || '') + `\n[Ошибка: ${e.message}]`;
+    md.remove();
+    addMsg('system', `Ошибка ответа ИИ: ${e.message}. Ответ не записан в историю.`);
   }
   if (full.trim() && full.includes('[Ошибка API:')) {
     md.remove();
     addMsg('system', full.trim() + '\n\nОтвет не добавлен в историю игры. Можно повторить отправку.');
     full = '';
   }
-  if (full.trim()) {
+  if (full.trim() && !streamFailed) {
     messages.push({role: 'assistant', content: full});
     persist();
     md.remove();
@@ -828,6 +918,7 @@ async function callAI(msgs) {
       }, 60);
     }
     await updateState();
+    await updateMemory();
   }
   busy = false; sendBtn.disabled = false;
   document.querySelectorAll('.quick-btn').forEach(b => b.disabled = false);
@@ -836,7 +927,7 @@ async function callAI(msgs) {
 async function updateState() {
   if (!state) state = {...EMPTY_STATE};
   try {
-    const res = await fetch('/api/state', {
+    const res = await apiFetch('/api/state', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({messages, state})
     });
@@ -849,7 +940,23 @@ async function updateState() {
       }
       renderStatus(); persist();
     }
-  } catch(e){}
+  } catch(e) {
+    addMsg('system', 'Не удалось обновить лист персонажа: ' + e.message);
+  }
+}
+
+async function updateMemory() {
+  const summarizedCount = Number(memory && memory.covered_count || 0);
+  if (messages.length - summarizedCount < 26) return;
+  try {
+    const res = await apiFetch('/api/memory', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({messages, memory})
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    memory = await res.json();
+    persist();
+  } catch(e) { console.warn('Память пока не обновлена:', e); }
 }
 
 /* SEND */
@@ -889,7 +996,7 @@ async function doRoll(expr) {
   await new Promise(r => setTimeout(r, 450));
   animDiv.remove();
   try {
-    const res = await fetch('/api/roll', {
+    const res = await apiFetch('/api/roll', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({expr})
     });
@@ -1217,9 +1324,9 @@ async function doSave(name) {
     if (!name) return;
   }
   try {
-    const res = await fetch('/api/save', {
+    const res = await apiFetch('/api/save', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({name, messages, state})
+      body: JSON.stringify({name, messages, state, memory})
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const d = await res.json();
@@ -1229,7 +1336,7 @@ async function doSave(name) {
 }
 async function doLoad(name) {
   let saves;
-  try { saves = await (await fetch('/api/saves')).json(); }
+  try { saves = await (await apiFetch('/api/saves')).json(); }
   catch(e) { addMsg('system', 'Ошибка: ' + e.message); return; }
   if (!saves.length) { addMsg('system', 'Нет сохранений.'); return; }
   if (!name) {
@@ -1237,19 +1344,21 @@ async function doLoad(name) {
     if (!name) return;
   }
   try {
-    const res = await fetch('/api/load/' + encodeURIComponent(name));
+    const res = await apiFetch('/api/load/' + encodeURIComponent(name));
     if (!res.ok) throw new Error('не найдено');
     const d = await res.json();
     messages = d.messages || [];
     state = d.state || {...EMPTY_STATE};
+    memory = d.memory || {};
     persist(); renderAll(); renderStatus();
+    await updateMemory();
     addMsg('system', `📂 Загружено: «${name}»`);
   } catch(e) { addMsg('system', 'Ошибка: ' + e.message); }
 }
 async function manageSaves() {
   let saves;
   try {
-    const res = await fetch('/api/saves');
+    const res = await apiFetch('/api/saves');
     if (!res.ok) throw new Error('Не удалось получить список сохранений');
     saves = await res.json();
   } catch (e) { addMsg('system', 'Ошибка списка сохранений: ' + e.message); return; }
@@ -1271,7 +1380,7 @@ async function manageSaves() {
     if (!newName) { manageSaves(); return; }
     if (newName === oldName) { manageSaves(); return; }
     try {
-      const res = await fetch('/api/save/rename', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({old_name:oldName,new_name:newName})});
+      const res = await apiFetch('/api/save/rename', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({old_name:oldName,new_name:newName})});
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Не удалось переименовать');
       addMsg('system', `✏️ Сохранение переименовано: «${oldName}» → «${data.name}»`);
@@ -1282,7 +1391,7 @@ async function manageSaves() {
     const name = btn.dataset.delete;
     if (!confirm(`Удалить сохранение «${name}» и его резервную копию? Это действие нельзя отменить.`)) return;
     try {
-      const res = await fetch('/api/save/delete', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})});
+      const res = await apiFetch('/api/save/delete', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})});
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Не удалось удалить');
       addMsg('system', `🗑️ Удалено сохранение: «${name}»`);
@@ -1293,8 +1402,8 @@ async function manageSaves() {
 
 function doReset() {
   if (!confirm('Начать новую игру? Текущая история будет потеряна.')) return;
-  messages = []; state = {...EMPTY_STATE};
-  try { localStorage.removeItem(AVATAR_KEY); } catch(e){}
+  messages = []; state = {...EMPTY_STATE}; memory = {};
+  try { localStorage.removeItem(AVATAR_KEY + '_' + authUser); } catch(e){}
   ttsStop();
   persist(); chatEl.innerHTML = ''; renderStatus(); showIntro();
 }
@@ -1338,8 +1447,8 @@ function renderWorlds() {
       if (!world || busy) return;
       drawerEl.classList.remove('open');
       drawerBg.classList.remove('open');
-      messages = []; state = {...EMPTY_STATE};
-      try { localStorage.removeItem(AVATAR_KEY); } catch(e){}
+      messages = []; state = {...EMPTY_STATE}; memory = {};
+      try { localStorage.removeItem(AVATAR_KEY + '_' + authUser); } catch(e){}
       ttsStop();
       chatEl.innerHTML = '';
       renderStatus();
@@ -1478,14 +1587,17 @@ document.querySelectorAll('#drawer .btn[data-action]').forEach(btn => {
     else if (a === 'manage-saves') manageSaves();
     else if (a === 'reset') doReset();
     else if (a === 'help') doHelp();
+    else if (a === 'logout') { try { sessionStorage.removeItem(AUTH_KEY); } catch(e){} location.reload(); }
   };
 });
 
-function init() {
+async function init() {
+  await ensureAuth();
   const saved = restore();
   if (saved && saved.messages.length) {
     messages = saved.messages;
     state = saved.state || {...EMPTY_STATE};
+    memory = saved.memory || {};
     // Совместимость
     if (!Array.isArray(state.relationships)) state.relationships = [];
     if (!Array.isArray(state.faction_clocks)) state.faction_clocks = [];
@@ -1519,6 +1631,7 @@ function init() {
     }
     renderAll(); renderStatus();
     addMsg('system', '↩ История восстановлена. Продолжайте.');
+    await updateMemory();
   } else {
     state = {...EMPTY_STATE};
     renderStatus();

@@ -1,70 +1,89 @@
-# RPG AI Master (patched)
+# RPG ИИ-Мастер — оптимизированная версия для Yandex AI Studio / Railway
 
-A local web RPG chat with character sheet, quests, notes, dice, save/load and an OpenAI-compatible model backend.
+Текстовая ролевая игра на Flask: ИИ-рассказчик, лист персонажа, XP, NPC, квесты, броски кубиков, заметки, озвучка и сохранения. Основа — `RPG-master-yandex-railway.zip`.
 
-## Yandex AI Studio (DeepSeek V4.1 Flash) на Railway
+## Быстрый запуск на Railway
 
-Добавьте в Railway → ваш проект → сервис → Variables следующие переменные:
+1. Создайте сервис Railway из этого репозитория / архива и убедитесь, что используется команда запуска `gunicorn -c gunicorn.conf.py app:app`. Зависимости находятся в `requirements.txt`.
+2. В **Variables** добавьте:
 
-- `YANDEX_API_KEY` — секретная часть API-ключа Yandex AI Studio.
-- `YANDEX_FOLDER_ID` — ID каталога, в котором создан сервисный аккаунт/API-ключ.
-- `YANDEX_MODEL` — необязательно. По умолчанию используется `gpt://<YANDEX_FOLDER_ID>/deepseek-v4.1-flash`.
+| Переменная | Значение |
+| --- | --- |
+| `YANDEX_API_KEY` | Ключ от Yandex AI Studio, хранить только в Variables |
+| `YANDEX_FOLDER_ID` | Идентификатор каталога Yandex Cloud |
+| `RPG_ACCESS_TOKEN` | **Обязательный** случайный длинный секретный ключ для входа в игру. Минимум 32 случайных символа рекомендуется |
+| `RPG_SAVES_DIR` | `/data/saves` (при настроенном томе Railway) |
 
-Для Yandex используется OpenAI-совместимый endpoint `https://ai.api.cloud.yandex.net/v1`.
-Ключ передаётся через переменные окружения; не помещайте его в исходники, README или GitHub.
-Если заданы `YANDEX_API_KEY` и `YANDEX_FOLDER_ID`, приложение автоматически выбирает Yandex AI Studio.
-Старые переменные `OPENAI_*` оставлены для совместимости с Ollama и другими OpenAI-совместимыми провайдерами.
+3. **Создайте и подключите постоянный Volume** в настройках Railway по пути `/data`. Без тома сохранения будут потеряны при замене экземпляра сервиса. `RPG_SAVES_DIR=/data/saves` сам по себе НЕ создаёт постоянный том.
+4. Разверните сервис, откройте приложение и войдите: пользователь `owner`, ключ — значение `RPG_ACCESS_TOKEN`. Ключ вводится в интерфейсе и хранится только в `sessionStorage` вкладки, не передаётся в файл сохранения или адресную строку.
+5. `/api/health` возвращает статус приложения, провайдера и название модели (не секреты).
 
-После добавления переменных перезапустите/redeploy сервис. Проверить состояние можно по `/api/health` — там отображаются провайдер и модель, но не секреты.
+Не добавляйте реальные ключи в GitHub, переменные исходников или файлы `.env` в репозитории. Для публичного сервера **не** устанавливайте `RPG_ALLOW_UNSAFE_LOCAL=1`.
 
-## Quick start (Windows)
+## Модели и оптимизация
 
-1. Install Python 3.10+.
-2. Open this folder in Terminal / CMD.
-3. Install dependencies:
-   ```bat
-   python -m pip install -r requirements.txt
-   ```
-4. Set the model connection for the current terminal session.
+| Переменная | Значение |
+| --- | --- |
+| `YANDEX_MODEL` | Необязательно; по умолчанию `gpt://<folder-id>/deepseek-v4.1-flash` |
+| `RPG_STATE_MODEL` | Необязательно; отдельная модель отслеживания состояния. По умолчанию модель рассказчика |
+| `RPG_SUMMARY_MODEL` | Необязательно; модель сжатия истории. По умолчанию модель рассказчика |
+| `RPG_MEMORY_UPDATE_AFTER` | Количество новых **старых** сообщений для обновления памяти; по умолчанию `16`, допустимое значение от `6` |
+| `OPENAI_FREQ_PENALTY` | Штраф за повторения рассказчика; по умолчанию `0.35` |
+| `OPENAI_PRES_PENALTY` | Штраф за повторения тем; по умолчанию `0.25` |
 
-### Ollama (local model)
+Архив памяти обновляется **не на каждом ходе**, а после накопления достаточного числа новых реплик. Сервер передаёт рассказчику системные инструкции, текущее состояние, резюме прошлых событий и непросуммированные последние реплики. При обновлении памяти отправляются только *ранее не обработанные* события вместе с текущим резюме. Память хранится в локальной сессии браузера и в JSON-сохранениях (`schema_version=3`).
 
-Ensure Ollama is running and that your model is downloaded. Example for Qwen 2.5:
+Система характеристик делает отдельный запрос после ответа рассказчика. В нём теперь требуется **JSON только изменённых полей**, а не повтор всего состояния. Изменённый массив заменяется полностью; явно переданное `[]` удаляет предметы, заметки или квесты, если они исчезли из игры. XP, уровни и пороги опыта вычисляются сервером по явным наградам `+N XP`; модель не имеет права править их напрямую.
 
-```bat
-ollama pull qwen2.5:7b
-set OPENAI_BASE_URL=http://localhost:11434/v1
-set OPENAI_API_KEY=ollama
-set OPENAI_MODEL=qwen2.5:7b
+В логах Gunicorn видны длительность вызовов рассказчика, памяти и характеристик, число символов ответа и количество токенов для непотоковых запросов, если провайдер прислал сведения о расходе.
+
+## Несколько игроков
+
+Вместо одного `RPG_ACCESS_TOKEN` можно указать **`RPG_USERS_JSON`**:
+
+```json
+{"alice":"свой-длинный-случайный-ключ-1","bob":"свой-длинный-случайный-ключ-2"}
+```
+
+Это **пример**, а не надёжные готовые ключи. Используйте уникальные случайные секреты для каждого игрока. Вход осуществляется по имени и ключу. Сохранения лежат в разных папках `<RPG_SAVES_DIR>/alice/`, `<RPG_SAVES_DIR>/bob/`; владелец `owner` — в `owner/`. Между ними нет доступа через API. При наличии одновременно `RPG_ACCESS_TOKEN` и `RPG_USERS_JSON` также доступен `owner`.
+
+Функции управления сохранениями находятся в меню игры: создать, загрузить, переименовать и удалить. Имена могут быть на русском языке; допустимы буквы, цифры, `_` и `-`, пробел заменяется подчёркиванием. При перезаписи создаётся резервная копия `.bak.json`. Старые сохранения из корня `saves/` автоматически перемещаются в `owner/` при первом запуске новой версии (если приложение работает с тем же постоянным диском). **Перед обновлением сделайте резервную копию каталога сохранений.**
+
+## Локальный запуск
+
+Нужен Python 3.10+. Установите зависимости:
+
+```bash
+python -m pip install -r requirements.txt
+```
+
+Для OpenAI-совместимых API можно использовать `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_MODEL`. Для Ollama, например:
+
+```bash
+# В разных операционных системах синтаксис переменных окружения отличается.
+export OPENAI_BASE_URL=http://127.0.0.1:11434/v1
+export OPENAI_API_KEY=ollama
+export OPENAI_MODEL=qwen2.5:7b
+export RPG_ALLOW_UNSAFE_LOCAL=1
 python app.py
 ```
 
-Open `http://127.0.0.1:5000` in your browser.
+Откройте `http://127.0.0.1:5000`. `RPG_ALLOW_UNSAFE_LOCAL=1` только для локальной разработки: встроенный сервер привязывается к `127.0.0.1`, а API в этом режиме отклоняет подключения не с loopback-адреса. В продакшене вместо него задавайте секретный ключ входа.
 
-If using a different Ollama model, replace `OPENAI_MODEL` with the exact model tag from `ollama list`.
+## Обратная совместимость и ограничения
 
-### Other OpenAI-compatible providers
+- Старые сохранения `schema_version=2` и локальная сессия браузера `rpg_session_v9` загружаются; резюме накопится при следующем обновлении памяти.
+- Сервер не отправляет полную прошлую историю после успешной архивации; память сохраняется даже после перезапуска страницы.
+- Первое сжатие очень длинной старой кампании может быть дорогим. Последующие обновления инкрементальные.
+- Это RPG-прототип, не строгий детерминированный движок D&D; правильность событий по-прежнему зависит от ИИ-модели. Без действующих API-ключей нельзя проверить реальное качество и стоимость генерации.
+- Авторизация токеном подходит для небольшой приватной игры. Для открытого массового проекта понадобятся полноценные аккаунты, ограничения частоты запросов, защита от злоупотребления API и отдельная БД.
 
-Set `OPENAI_BASE_URL`, `OPENAI_API_KEY`, and `OPENAI_MODEL` to the provider's endpoint, key, and model. If `OPENAI_BASE_URL` is unset, the OpenAI API is used.
+## Проверки
 
-## Changes in this patched build
+После установки зависимостей:
 
-- Rolling campaign memory: an existing summary is updated instead of freezing after the first summary.
-- Character state is preserved conservatively when the state-extraction model returns incomplete/empty lists.
-- XP is applied by the server from explicit `+N XP` lines in new assistant replies, and message event IDs prevent repeat awards.
-- Level and next-level XP threshold are derived from XP on the server; level-up choices are left for the player rather than silently applied.
-- Current character state is sent to the master as context each turn.
-- API failures are shown as system errors and are not stored as master dialogue.
-- Saves use atomic writes and keep a `.bak.json` backup of the previous save.
-- Save JSON is versioned and malformed saves show a clear error.
-- `/api/health` reports the configured model/provider (without exposing credentials).
+```bash
+python -m unittest discover -s tests -v
+```
 
-## Notes
-
-- Level-up HP/stat/ability choices are still handled through the game conversation after the server announces an available level. The engine does not silently choose a stat or ability.
-- This is a patched prototype, not a fully deterministic D&D combat engine. Combat, spell effects, NPC motivations and quest logic still depend on the language model unless represented in the character state.
-- Back up your `saves/` folder before upgrading the project.
-
-### Управление сохранениями
-
-В боковом меню игры есть пункт **«Управление сохранениями»**. Там можно переименовать сохранение (кнопка с карандашом) или удалить его (кнопка с корзиной). Удаление также удаляет резервную копию `.bak.json` и требует подтверждения. Имена сохранений допускают латинские буквы, цифры, дефис и подчёркивание.
+Также можно проверить синтаксис `python -m py_compile app.py` и JavaScript через `node --check`.
