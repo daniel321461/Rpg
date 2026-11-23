@@ -36,22 +36,35 @@
   }
   .status-row { display: flex; align-items: center; gap: 10px; }
   .status-top { display: flex; align-items: center; gap: 12px; }
-  .avatar-wrap {
-    width: 48px; height: 48px; border-radius: 50%; overflow: hidden;
-    border: 2px solid var(--accent-gold); background: var(--bg-card);
-    flex-shrink: 0; position: relative; cursor: pointer;
-    display: flex; align-items: center; justify-content: center;
-    transition: transform 0.2s;
+  /* Pure emoji insignia: no image fetches or image-generation services. */
+  .identity-crest {
+    width: 50px; height: 50px; border-radius: 15px;
+    border: 2px solid var(--accent-gold); background: #342a20;
+    flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+    font-size: 27px; cursor: pointer;
   }
-  .avatar-wrap:active { transform: scale(0.95); }
-  .avatar-wrap img { width: 100%; height: 100%; object-fit: cover; display: block; }
-  .avatar-placeholder { color: var(--accent-gold); font-size: 20px; font-family: var(--font-serif); font-weight: bold; }
-  .avatar-wrap.loading::after {
-    content: ''; position: absolute; inset: 0;
-    border: 2px solid transparent; border-top-color: var(--accent-gold);
-    border-radius: 50%; animation: spin 0.8s linear infinite;
+  .identity-crest:focus-visible, .creator-option:focus-visible { outline: 2px solid var(--accent-gold); outline-offset: 3px; }
+  .identity-tags { display:flex; flex-wrap:wrap; gap:5px; margin-top:2px; }
+  .identity-tag {
+    display:inline-flex; gap:5px; align-items:center; padding:3px 8px;
+    background:#302820; border:1px solid #554333; border-radius:20px;
+    font-size:11px; color:var(--text-primary); max-width:100%;
   }
-  @keyframes spin { to { transform: rotate(360deg); } }
+  .identity-tag .symbol { font-size:15px; line-height:1.1; }
+  .identity-hero { display:flex; align-items:center; gap:12px; padding:10px;
+    border:1px solid var(--border-subtle); border-radius:12px; background:var(--bg-card); }
+  .identity-hero-crest { font-size:47px; line-height:1.15; }
+  .creator-group { display:flex; flex-direction:column; gap:8px; }
+  .creator-heading { font-size:13px; color:var(--accent-gold); font-weight:700; }
+  .creator-options { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; }
+  .creator-option { display:flex; flex-direction:column; align-items:center; gap:3px;
+    padding:8px 3px; min-height:61px; border:1px solid var(--border-subtle);
+    border-radius:9px; background:var(--bg-card); color:var(--text-primary);
+    cursor:pointer; font:inherit; font-size:11px; overflow-wrap:anywhere; }
+  .creator-option .symbol { font-size:25px; line-height:1.3; }
+  .creator-option.selected { border-color:var(--accent-gold); background:#3d301c; }
+  .creator-preview { display:flex; flex-wrap:wrap; gap:6px; margin-top:4px; }
+  .creator-hint { font-size:12px; color:var(--text-secondary); }
   .status-info { flex: 1; display: flex; flex-direction: column; gap: 4px; }
   .status-name { font-weight: 700; color: var(--accent-gold); font-family: var(--font-serif); font-size: 15px; }
   .status-sub { font-size: 11px; color: var(--text-secondary); margin-top: -2px; }
@@ -208,7 +221,6 @@
   .stat-box .lbl { font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; }
   .stat-box .val { font-size: 18px; font-weight: 700; color: var(--accent-gold); margin-top: 4px; font-family: var(--font-serif); }
   .stat-box .mod { font-size: 11px; color: var(--text-secondary); margin-top: 2px; font-family: monospace; }
-  .avatar-large { display: block; margin: 0 auto; width: 220px; height: 220px; border-radius: 50%; border: 3px solid var(--accent-gold); object-fit: cover; background: var(--bg-deep); }
   .dc-box { background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 10px; margin-top: 8px; }
   .dc-box.up { border-color: #5a3a2a; }
   .dc-box.down { border-color: #2a4a2a; }
@@ -323,6 +335,7 @@
   <div class="drawer-section">
     <button class="btn" data-action="dice">🎲 Бросок 1d20</button>
     <button class="btn" data-action="dice-custom">🎲 Свой бросок...</button>
+    <button class="btn" data-action="create">🧬 Создать персонажа</button>
     <button class="btn" data-action="sheet">📜 Полный лист</button>
     <button class="btn" data-action="skills">🎯 Умения и навыки</button>
     <button class="btn" data-action="notes">📝 Заметки <span class="drawer-badge" id="drawer-notes-badge" style="display:none">0</span></button>
@@ -353,7 +366,8 @@
 <script>
 let messages = [], state = null, memory = {}, busy = false;
 let authUser = 'owner', authToken = '';
-const AUTH_KEY = 'rpg_access_v1';
+const AUTH_KEY = 'rpg_session_auth_v2';
+try { sessionStorage.removeItem('rpg_access_v1'); } catch(e) {}
 
 const chatEl = document.getElementById('chat');
 const inputEl = document.getElementById('input');
@@ -365,7 +379,6 @@ const modalContent = document.getElementById('modal-content');
 const statusEl = document.getElementById('status');
 
 const LS_KEY = 'rpg_session_v10';
-const AVATAR_KEY = 'rpg_avatar_v1';
 const TTS_KEY = 'rpg_tts_v1';
 
 const EMPTY_STATE = {
@@ -418,7 +431,8 @@ function esc(s) {
   return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
-/* AUTH: tokens stay in sessionStorage; no token ever enters the save or URL. */
+/* AUTH: one-time login password is never stored; short-lived opaque session token
+   stays only in sessionStorage, and is checked by the server for every API call. */
 function authHeaders() {
   return {'Authorization': 'Bearer ' + authToken, 'X-RPG-User': authUser};
 }
@@ -434,50 +448,121 @@ async function checkAuth(user, token) {
   } catch (e) { return null; }
 }
 async function showLogin() {
-  modalContent.innerHTML = `<h3>🔒 Вход в RPG-мастер</h3>
-    <p style="color:var(--text-secondary)">Введите имя и секретный ключ из переменных Railway. Для одного владельца имя: owner.</p>
-    <label for="login-user">Пользователь</label>
-    <input id="login-user" type="text" autocomplete="username" value="owner" maxlength="48" style="width:100%;margin:8px 0;padding:10px">
-    <label for="login-token">Секретный ключ</label>
-    <input id="login-token" type="password" autocomplete="current-password" style="width:100%;margin:8px 0;padding:10px">
-    <div id="login-error" style="color:#e57373;min-height:20px;font-size:13px"></div>
-    <button class="btn primary" id="login-submit" style="width:100%">Войти</button>`;
+  let config = {registration_enabled: true, invite_required: false};
+  try {
+    const r = await fetch('/api/auth/config', {cache: 'no-store'});
+    if (r.ok) config = await r.json();
+  } catch (e) { /* Server/network failure will surface on submission. */ }
+  const registrationTab = config.registration_enabled
+    ? '<button class="btn" id="auth-register-mode" type="button">Зарегистрироваться</button>'
+    : '';
+  const inviteField = config.invite_required
+    ? `<div id="invite-group" style="display:none"><label for="auth-invite">Код приглашения</label>
+       <input id="auth-invite" type="password" autocomplete="off" maxlength="128"></div>`
+    : '';
+  modalContent.innerHTML = `<h3>🎲 RPG-мастер</h3>
+    <p style="color:var(--text-secondary)">Войдите в свой аккаунт или создайте новый. У каждого игрока будут свои сохранения.</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn primary" id="auth-login-mode" type="button">Войти</button>
+      ${registrationTab}
+    </div>
+    <label for="auth-username">Логин</label>
+    <input id="auth-username" type="text" autocomplete="username" placeholder="Например, ivan" maxlength="32">
+    <label for="auth-password">Пароль</label>
+    <input id="auth-password" type="password" autocomplete="current-password" maxlength="128">
+    <div id="auth-confirm-group" style="display:none">
+      <label for="auth-confirm">Повторите пароль</label>
+      <input id="auth-confirm" type="password" autocomplete="new-password" maxlength="128">
+    </div>
+    ${inviteField}
+    <p id="auth-hint" style="font-size:12px;color:var(--text-secondary)">Для владельца: логин owner и ключ RPG_ACCESS_TOKEN.</p>
+    <div id="auth-error" role="alert" style="color:#e57373;min-height:20px;font-size:13px"></div>
+    <button class="btn primary" id="auth-submit" type="button" style="width:100%">Войти</button>`;
   modalEl.classList.add('open');
   return new Promise(resolve => {
-    const button = document.getElementById('login-submit');
-    const tokenBox = document.getElementById('login-token');
-    const usernameBox = document.getElementById('login-user');
-    const error = document.getElementById('login-error');
+    const userBox = document.getElementById('auth-username');
+    const passBox = document.getElementById('auth-password');
+    const confirmBox = document.getElementById('auth-confirm');
+    const confirmGroup = document.getElementById('auth-confirm-group');
+    const inviteGroup = document.getElementById('invite-group');
+    const hint = document.getElementById('auth-hint');
+    const error = document.getElementById('auth-error');
+    const button = document.getElementById('auth-submit');
+    const loginTab = document.getElementById('auth-login-mode');
+    const registerTab = document.getElementById('auth-register-mode');
+    let mode = 'login';
+    function setMode(next) {
+      mode = next;
+      const isRegister = mode === 'register';
+      confirmGroup.style.display = isRegister ? '' : 'none';
+      if (inviteGroup) inviteGroup.style.display = isRegister ? '' : 'none';
+      passBox.autocomplete = isRegister ? 'new-password' : 'current-password';
+      button.textContent = isRegister ? 'Создать аккаунт' : 'Войти';
+      hint.textContent = isRegister
+        ? 'Логин: 3–32 символа (буквы, цифры, _ или -). Пароль: минимум 8 символов.'
+        : 'Для владельца: логин owner и ключ RPG_ACCESS_TOKEN.';
+      loginTab.classList.toggle('primary', !isRegister);
+      if (registerTab) registerTab.classList.toggle('primary', isRegister);
+      error.textContent = '';
+    }
+    loginTab.onclick = () => setMode('login');
+    if (registerTab) registerTab.onclick = () => setMode('register');
     async function submit() {
-      const user = usernameBox.value.trim() || 'owner', token = tokenBox.value;
-      button.disabled = true;
-      error.textContent = 'Проверяем доступ…';
-      const verifiedUser = await checkAuth(user, token);
-      if (verifiedUser) {
-        authUser = verifiedUser; authToken = token;
-        try { sessionStorage.setItem(AUTH_KEY, JSON.stringify({user: authUser, token: authToken})); } catch(e){}
-        modalEl.classList.remove('open'); resolve(true);
-      } else {
-        error.textContent = 'Неверный ключ или нет соединения с сервером.';
-        button.disabled = false;
+      const username = userBox.value.trim(), password = passBox.value;
+      if (!username || !password) { error.textContent = 'Введите логин и пароль.'; return; }
+      if (mode === 'register' && password !== confirmBox.value) {
+        error.textContent = 'Пароли не совпадают.'; return;
       }
+      button.disabled = true;
+      error.textContent = mode === 'register' ? 'Создаём аккаунт…' : 'Проверяем пароль…';
+      try {
+        const endpoint = mode === 'register' ? '/api/auth/register' : '/api/auth/login';
+        const payload = {username, password};
+        if (inviteGroup) payload.invite_code = document.getElementById('auth-invite').value;
+        const response = await fetch(endpoint, {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(payload), cache: 'no-store'
+        });
+        const result = await response.json();
+        if (!response.ok || !result.ok || !result.token) {
+          error.textContent = result.error || 'Не удалось войти. Повторите попытку.';
+          return;
+        }
+        authUser = result.user;
+        authToken = result.token;
+        try { sessionStorage.setItem(AUTH_KEY, JSON.stringify({user: authUser, token: authToken})); } catch(e) {}
+        modalEl.classList.remove('open');
+        resolve(true);
+      } catch(e) {
+        error.textContent = 'Нет соединения с сервером. Попробуйте ещё раз.';
+      } finally { button.disabled = false; }
     }
     button.onclick = submit;
-    tokenBox.onkeydown = e => { if (e.key === 'Enter') submit(); };
-    tokenBox.focus();
+    [userBox, passBox, confirmBox].forEach(el => {
+      el.onkeydown = e => { if (e.key === 'Enter') submit(); };
+    });
+    userBox.focus();
   });
 }
 async function ensureAuth() {
   let saved;
-  try { saved = JSON.parse(sessionStorage.getItem(AUTH_KEY) || 'null'); } catch(e){}
+  try { saved = JSON.parse(sessionStorage.getItem(AUTH_KEY) || 'null'); } catch(e) {}
   if (saved && saved.user && typeof saved.token === 'string') {
     const user = await checkAuth(saved.user, saved.token);
     if (user) { authUser = user; authToken = saved.token; return true; }
+    try { sessionStorage.removeItem(AUTH_KEY); } catch(e) {}
   }
-  // Development-only localhost mode may not require credentials.
+  // Only local unsafe development mode may have no credentials.
   const unauthenticatedUser = await checkAuth('owner', '');
   if (unauthenticatedUser) { authUser = unauthenticatedUser; authToken = ''; return true; }
   return showLogin();
+}
+async function logoutAccount() {
+  try {
+    await fetch('/api/auth/logout', {method: 'POST', headers: authHeaders(), cache: 'no-store'});
+  } catch(e) { /* Logging out locally still works without network. */ }
+  try { sessionStorage.removeItem(AUTH_KEY); } catch(e) {}
+  location.reload();
 }
 async function apiFetch(url, options={}) {
   const makeRequest = () => fetch(url, {
@@ -485,7 +570,7 @@ async function apiFetch(url, options={}) {
   });
   let response = await makeRequest();
   if (response.status === 401) {
-    try { sessionStorage.removeItem(AUTH_KEY); } catch(e){}
+    try { sessionStorage.removeItem(AUTH_KEY); } catch(e) {}
     const previousUser = authUser;
     await showLogin();
     if (authUser !== previousUser) {
@@ -518,100 +603,156 @@ const COVER_LABELS = {
 function getPositionInfo(pos) { return POSITION_LABELS[pos] || { icon: '❔', label: pos || '—', mod: 0 }; }
 function getCoverInfo(cov) { return COVER_LABELS[cov] || { icon: '', label: cov || '—', mod: 0 }; }
 
-/* AVATAR */
-function detectArchetype(st) {
-  const s = st.stats || {};
-  const cls = (st.class || '').toLowerCase();
-  const clsMap = {
-    'воин': 'warrior knight fighter', 'варвар': 'barbarian berserker',
-    'паладин': 'paladin knight holy', 'плут': 'rogue assassin thief',
-    'следопыт': 'ranger archer hunter', 'монах': 'monk martial artist',
-    'маг': 'wizard mage sorcerer', 'жрец': 'cleric priest',
-    'друид': 'druid nature shaman', 'бард': 'bard musician',
-    'колдун': 'warlock dark mage', 'чародей': 'sorcerer magic'
-  };
-  for (const key in clsMap) { if (cls.includes(key)) return clsMap[key]; }
-  const values = [['str','warrior knight'],['dex','rogue thief'],['int','wizard mage'],['wis','cleric druid'],['cha','bard warlock']];
-  let best = ['str', 'adventurer'], maxVal = -1;
-  for (const [k, role] of values) {
-    if ((s[k] || 10) > maxVal) { maxVal = s[k] || 10; best = [k, role]; }
-  }
-  return best[1];
+/* CHARACTER INSIGNIA — lightweight emoji stickers, calculated from saved character fields.
+   Works with both new and pre-existing campaigns, including names entered directly in chat. */
+const CHARACTER_CHOICES = {
+  race: [
+    ['Человек','🧑'], ['Эльф','🧝'], ['Полуэльф','🌿'],
+    ['Дварф','🪓'], ['Гном','🛠️'], ['Полурослик','🍀'],
+    ['Орк','👹'], ['Полуорк','🛡️'], ['Тифлинг','😈'],
+    ['Драконорождённый','🐉'], ['Дроу','🌙'], ['Фея','🧚']
+  ],
+  class: [
+    ['Воин','⚔️'], ['Маг','🧙'], ['Плут','🗡️'],
+    ['Следопыт','🏹'], ['Паладин','🛡️'], ['Варвар','🪓'],
+    ['Жрец','✨'], ['Друид','🌳'], ['Бард','🎵'],
+    ['Колдун','🔮'], ['Чародей','🌟'], ['Монах','🥋']
+  ],
+  background: [
+    ['Преступник','⛓️'], ['Солдат','🎖️'], ['Мудрец','📚'],
+    ['Благородный','👑'], ['Народный герой','🌾'], ['Отшельник','🏕️'],
+    ['Артист','🎭'], ['Бродяга','🎒'], ['Моряк','⚓'],
+    ['Наёмник','💰'], ['Шарлатан','🃏'], ['Прислужник','🕯️']
+  ]
+};
+const CHARACTER_ALIASES = {
+  race: [
+    [/полуэльф|half.?elf/, '🌿'], [/полуорк|half.?orc/, '🛡️'],
+    [/дроу|тёмн.*эльф|dark elf/, '🌙'],
+    [/драконорож|драконид|dragonborn/, '🐉'],
+    [/тифлинг|tiefling/, '😈'], [/орк|orcs?/, '👹'],
+    [/эльф|elf/, '🧝'], [/дварф|дворф|гном.*гор|dwarf/, '🪓'],
+    [/полуросл|халфлинг|хоббит|halfling/, '🍀'],
+    [/гном|gnome/, '🛠️'], [/фе[яи]|fairy/, '🧚'],
+    [/гоблин|goblin/, '👺'], [/нежить|скелет|undead/, '💀'],
+    [/человек|люди|human/, '🧑']
+  ],
+  class: [
+    [/паладин|paladin/, '🛡️'], [/варвар|berserk|barbarian/, '🪓'],
+    [/плут|вор|разбойник|assassin|rogue/, '🗡️'],
+    [/следопыт|рейнджер|ranger|лучник|охотник/, '🏹'],
+    [/колдун|чернокнижник|warlock/, '🔮'],
+    [/чародей|sorcerer/, '🌟'], [/маг|волшебник|чароде[йя]|wizard|mage/, '🧙'],
+    [/жрец|клирик|cleric|священник/, '✨'],
+    [/друид|druid/, '🌳'], [/бард|bard/, '🎵'],
+    [/монах|monk/, '🥋'], [/воин|рыцарь|fighter|knight|боец/, '⚔️']
+  ],
+  background: [
+    [/преступник|вор|бандит|criminal|контрабандист/, '⛓️'],
+    [/солдат|военн|ветеран|soldier/, '🎖️'],
+    [/мудрец|учён|исследователь|sage|учитель/, '📚'],
+    [/благород|аристократ|дворянин|noble/, '👑'],
+    [/народн.*геро|folk hero/, '🌾'], [/отшельник|hermit/, '🏕️'],
+    [/артист|акт[её]р|artist|entertainer/, '🎭'],
+    [/бродяг|беспризор|urchin|странник/, '🎒'],
+    [/моряк|пират|sailor|pirate/, '⚓'],
+    [/на[её]мник|mercenary/, '💰'], [/шарлатан|мошенник|charlatan/, '🃏'],
+    [/прислужник|служитель|acolyte/, '🕯️']
+  ]
+};
+function characterIcon(kind, value) {
+  const text = String(value || '').trim().toLowerCase().replace(/ё/g, 'е');
+  if (!text) return '❔';
+  const choice = (CHARACTER_CHOICES[kind] || []).find(([label]) => label.toLowerCase().replace(/ё/g, 'е') === text);
+  if (choice) return choice[1];
+  const alias = (CHARACTER_ALIASES[kind] || []).find(([pattern]) => pattern.test(text));
+  return alias ? alias[1] : ({race:'🧬', class:'🎯', background:'📜'}[kind] || '❔');
 }
-function buildAvatarPrompt(st) {
-  const archetype = detectArchetype(st);
-  const conditions = (st.conditions || []).join(', ');
-  const race = st.race ? st.race + ' ' : '';
-  const name = st.name || 'Adventurer';
-  return `Fantasy RPG character portrait of ${name}, ${race}${archetype}, level ${st.level}, detailed digital painting, dramatic lighting, dark atmospheric background, painterly style, high quality, centered composition${conditions ? ', ' + conditions : ''}`;
+function identityTag(kind, value, label = '') {
+  if (!value) return '';
+  const icon = characterIcon(kind, value);
+  return `<span class="identity-tag" title="${esc(label || value)}"><span class="symbol" aria-hidden="true">${icon}</span>${esc(value)}</span>`;
 }
-function cachedAvatarFor(name) {
-  try {
-    const raw = localStorage.getItem(AVATAR_KEY + '_' + authUser);
-    if (!raw) return null;
-    const data = JSON.parse(raw);
-    if (data.name === name && data.url) return data;
-  } catch(e){}
-  return null;
+function characterIdentity(st) {
+  return identityTag('race', st.race, 'Раса') + identityTag('class', st.class, 'Класс') + identityTag('background', st.background, 'Предыстория');
 }
-function saveAvatar(name, url) {
-  try { localStorage.setItem(AVATAR_KEY + '_' + authUser, JSON.stringify({name, url})); } catch(e){}
-}
-function generateAvatar(force) {
-  if (!state || !state.name || state.name === 'Пустой') return;
-  const wrap = document.querySelector('.avatar-wrap');
-  if (!wrap) return;
-  if (!force) {
-    const cached = cachedAvatarFor(state.name);
-    if (cached) { wrap.innerHTML = `<img src="${cached.url}" alt="${esc(state.name)}">`; return; }
-  }
-  wrap.innerHTML = '<div class="avatar-placeholder">?</div>';
-  wrap.classList.add('loading');
-  const prompt = buildAvatarPrompt(state);
-  const seed = Math.floor(Math.random() * 999999);
-  const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=256&height=256&seed=${seed}&nologo=true&model=flux&enhance=true`;
-  const img = new Image();
-  img.crossOrigin = 'anonymous';
-  img.onload = () => {
-    wrap.classList.remove('loading');
-    wrap.innerHTML = `<img src="${url}" alt="${esc(state.name)}">`;
-    saveAvatar(state.name, url);
-  };
-  img.onerror = () => {
-    const fallback = `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(state.name)}&backgroundColor=24201d&radius=50`;
-    wrap.classList.remove('loading');
-    wrap.innerHTML = `<img src="${fallback}" alt="${esc(state.name)}">`;
-    saveAvatar(state.name, fallback);
-  };
-  img.src = url;
-}
-function maybeGenerateAvatar() {
-  if (!state || !state.name || state.name === 'Пустой') return;
-  const cached = cachedAvatarFor(state.name);
-  const wrap = document.querySelector('.avatar-wrap');
-  if (!wrap) return;
-  if (cached) { wrap.innerHTML = `<img src="${cached.url}" alt="${esc(state.name)}">`; }
-  else { generateAvatar(false); }
-}
-function openAvatarModal() {
-  if (!state || !state.name || state.name === 'Пустой') {
-    addMsg('system', 'Имя персонажа ещё не определено. Сыграйте пару ходов.');
-    return;
-  }
-  const cached = cachedAvatarFor(state.name);
-  const imgSrc = cached ? cached.url : '';
+
+/* Creation form is optional: players can still describe any character in free text. */
+function openCharacterCreator(world = null) {
+  if (busy) return;
+  if (messages.length && !confirm('Начать новую игру? Несохранённый прогресс текущего приключения будет потерян.')) return;
+  const picked = {race:'', class:'', background:''};
+  const sections = [
+    ['race', '🧬 Раса'], ['class', '⚔️ Класс'], ['background', '📜 Предыстория']
+  ];
   modalContent.innerHTML = `
-    <h3>🖼 Портрет: ${esc(state.name)}</h3>
-    ${imgSrc ? `<img class="avatar-large" src="${imgSrc}" alt="${esc(state.name)}">` : `<div style="text-align:center;padding:20px;color:var(--text-secondary)">Портрет ещё не сгенерирован</div>`}
-    <button class="btn primary" id="regen-avatar">⟳ Сгенерировать заново</button>
-    <button class="btn" onclick="document.getElementById('modal').classList.remove('open')">Закрыть</button>
-  `;
+    <h3>🧬 Создание персонажа${world ? ' · ' + esc(world.name) : ''}</h3>
+    <div class="creator-hint">Выберите три значка. Они появятся в вашем профиле без генерации картинок.</div>
+    <label for="creator-name">Имя персонажа</label>
+    <input id="creator-name" maxlength="60" placeholder="Например, Арден" autocomplete="off">
+    ${sections.map(([key, heading]) => `
+      <div class="creator-group"><div class="creator-heading">${heading}</div>
+        <div class="creator-options" data-options="${key}">
+          ${CHARACTER_CHOICES[key].map(([value, icon]) => `<button type="button" class="creator-option" data-group="${key}" data-value="${esc(value)}" aria-pressed="false"><span class="symbol" aria-hidden="true">${icon}</span><span>${esc(value)}</span></button>`).join('')}
+          <button type="button" class="creator-option" data-group="${key}" data-value="__other__" aria-pressed="false"><span class="symbol" aria-hidden="true">✍️</span><span>Свой вариант</span></button>
+        </div>
+        <input class="creator-custom" id="creator-custom-${key}" maxlength="70" placeholder="Укажите свой вариант" aria-label="Свой вариант: ${heading}" style="display:none">
+      </div>`).join('')}
+    <div class="creator-heading">Ваши значки</div><div class="creator-preview" id="creator-preview"></div>
+    <label for="creator-details">Дополнительно (необязательно)</label>
+    <input id="creator-details" maxlength="350" placeholder="Характер, внешность, цель, особенности мира">
+    <div id="creator-error" class="creator-hint" role="alert"></div>
+    <button type="button" class="btn primary" id="creator-submit">✨ Начать приключение</button>
+    ${world ? '<button type="button" class="btn" id="creator-skip">🎲 Начать без анкеты</button>' : ''}
+    <button type="button" class="btn" id="creator-cancel">Отмена</button>`;
   modalEl.classList.add('open');
-  document.getElementById('regen-avatar').onclick = () => {
-    localStorage.removeItem(AVATAR_KEY + '_' + authUser);
+  const preview = document.getElementById('creator-preview');
+  const error = document.getElementById('creator-error');
+  const valueFor = key => picked[key] === '__other__'
+    ? document.getElementById('creator-custom-' + key).value.trim() : picked[key];
+  function redraw() {
+    preview.innerHTML = sections.map(([key]) => {
+      const val = valueFor(key);
+      return val ? identityTag(key, val) : `<span class="identity-tag"><span class="symbol">❔</span>${({race:'Раса',class:'Класс',background:'Предыстория'})[key]}</span>`;
+    }).join('');
+    error.textContent = '';
+  }
+  modalContent.querySelectorAll('.creator-option').forEach(button => button.onclick = () => {
+    const kind = button.dataset.group;
+    picked[kind] = button.dataset.value;
+    modalContent.querySelectorAll(`[data-group="${kind}"]`).forEach(b => {
+      const selected = b === button;
+      b.classList.toggle('selected', selected);
+      b.setAttribute('aria-pressed', String(selected));
+    });
+    const custom = document.getElementById('creator-custom-' + kind);
+    custom.style.display = picked[kind] === '__other__' ? 'block' : 'none';
+    redraw();
+    if (picked[kind] === '__other__') custom.focus();
+  });
+  modalContent.querySelectorAll('.creator-custom').forEach(i => i.addEventListener('input', redraw));
+  document.getElementById('creator-cancel').onclick = () => modalEl.classList.remove('open');
+  function startGame(description, hero = null) {
     modalEl.classList.remove('open');
-    generateAvatar(true);
+    messages = []; state = {...EMPTY_STATE, ...(hero || {})}; memory = {};
+    ttsStop(); chatEl.innerHTML = ''; renderStatus(); persist();
+    sendMessage(description);
+  }
+  document.getElementById('creator-submit').onclick = () => {
+    const name = document.getElementById('creator-name').value.trim();
+    const race = valueFor('race'), cls = valueFor('class'), background = valueFor('background');
+    if (!name || !race || !cls || !background) {
+      error.textContent = 'Заполните имя и выберите расу, класс и предысторию.';
+      return;
+    }
+    const details = document.getElementById('creator-details').value.trim();
+    const description = `${world ? world.prompt + '\n' : ''}Мой персонаж: имя — ${name}; раса — ${race}; класс — ${cls}; предыстория — ${background}. ${details} Начни с создания листа персонажа и первой сцены приключения.`;
+    startGame(description, {name, race, class: cls, background});
   };
+  if (world) document.getElementById('creator-skip').onclick = () => {
+    startGame(world.prompt + ' Если я ещё не описал персонажа — сначала предложи 2–3 варианта расы, класса и предыстории на выбор.');
+  };
+  redraw();
 }
 
 /* TTS */
@@ -785,7 +926,6 @@ function renderStatus() {
   const c = (state.conditions || []).length
     ? ' · ' + state.conditions.map(x => `<span style="color:#d45a5a">${esc(x)}</span>`).join(', ')
     : '';
-  const raceClass = [state.race, state.class].filter(Boolean).join(' · ');
   const dc = state.dc_modifier || 0;
   let dcChip = '';
   if (dc !== 0) {
@@ -803,12 +943,10 @@ function renderStatus() {
     ? `<span class="status-chip dc-up">⛓ Связан</span>` : '';
   statusEl.innerHTML = `
     <div class="status-top">
-      <div class="avatar-wrap" title="Нажмите, чтобы увидеть портрет">
-        <div class="avatar-placeholder">?</div>
-      </div>
+      <button class="identity-crest" type="button" title="Открыть лист персонажа" aria-label="Открыть лист персонажа">${characterIcon('class', state.class)}</button>
       <div class="status-info">
         <div class="status-name">${esc(state.name || 'Пустой')}</div>
-        ${raceClass ? `<div class="status-sub">${esc(raceClass)}</div>` : ''}
+        <div class="identity-tags">${characterIdentity(state)}</div>
         <div class="status-chips">
           <span class="status-chip">Ур. ${state.level}</span>
           ${state.level_pending ? `<span class="status-chip" title="Обсуди повышение с мастером">⬆ Повышение!</span>` : ''}
@@ -827,9 +965,8 @@ function renderStatus() {
       <div class="bar-wrap"><div class="bar-fill bar-xp" style="width:${xpPct}%"></div></div>
       <span class="bar-label">${state.xp}/${state.xp_next}</span></div>
     ${c ? `<div class="status-row" style="font-size:12px;color:var(--text-secondary)">${c}</div>` : ''}`;
-  const wrap = statusEl.querySelector('.avatar-wrap');
-  if (wrap) wrap.onclick = openAvatarModal;
-  maybeGenerateAvatar();
+  const crest = statusEl.querySelector('.identity-crest');
+  if (crest) crest.onclick = doSheet;
   updateNotesBadge();
 }
 
@@ -970,6 +1107,8 @@ async function sendMessage(text) {
     handleCommand(c.toLowerCase(), r.join(' '));
     return;
   }
+  const createButton = chatEl.querySelector('[data-create-character]');
+  if (createButton) createButton.remove();
   addMsg('user', text);
   messages.push({role: 'user', content: text});
   persist();
@@ -1116,19 +1255,18 @@ async function doSheet() {
     const m = Math.floor((val - 10) / 2);
     return m >= 0 ? '+' + m : '' + m;
   };
-  const cached = cachedAvatarFor(state.name);
-  const avatar = cached
-    ? `<img class="avatar-large" src="${cached.url}" alt="${esc(state.name)}" style="width:140px;height:140px">`
-    : '';
-
   const notesCount = (state.notes || []).length;
   const notesUnread = (state.notes || []).filter(n => n.unread).length;
 
   modalContent.innerHTML = `
-    ${avatar}
-    <h3>📜 ${esc(state.name || 'Пустой')}</h3>
-    ${state.race || state.class ? `<div class="kv"><span class="k">Раса · Класс</span><span class="v">${esc(state.race || '—')} · ${esc(state.class || '—')}</span></div>` : ''}
-    ${state.background ? `<div class="kv"><span class="k">Предыстория</span><span class="v">${esc(state.background)}</span></div>` : ''}
+    <div class="identity-hero">
+      <div class="identity-hero-crest" aria-hidden="true">${characterIcon('class', state.class)}</div>
+      <div><h3>📜 ${esc(state.name || 'Пустой')}</h3>
+      <div class="identity-tags">${characterIdentity(state)}</div></div>
+    </div>
+    <div class="kv"><span class="k">Раса</span><span class="v">${characterIcon('race', state.race)} ${esc(state.race || '—')}</span></div>
+    <div class="kv"><span class="k">Класс</span><span class="v">${characterIcon('class', state.class)} ${esc(state.class || '—')}</span></div>
+    <div class="kv"><span class="k">Предыстория</span><span class="v">${characterIcon('background', state.background)} ${esc(state.background || '—')}</span></div>
     <div class="kv"><span class="k">Уровень</span><span class="v">${state.level}${state.level_pending ? ` · повышение доступно (${state.level_pending})` : ''}</span></div>
     <div class="kv"><span class="k">Опыт</span><span class="v">${state.xp} / ${state.xp_next}</span></div>
     <div class="kv"><span class="k">Здоровье</span><span class="v">${state.hp} / ${state.max_hp}</span></div>
@@ -1403,7 +1541,6 @@ async function manageSaves() {
 function doReset() {
   if (!confirm('Начать новую игру? Текущая история будет потеряна.')) return;
   messages = []; state = {...EMPTY_STATE}; memory = {};
-  try { localStorage.removeItem(AVATAR_KEY + '_' + authUser); } catch(e){}
   ttsStop();
   persist(); chatEl.innerHTML = ''; renderStatus(); showIntro();
 }
@@ -1431,9 +1568,18 @@ function renderAll() {
 }
 function showIntro() {
   addMsg('system', 'Опишите персонажа, мир, тон и стартовую ситуацию.\n' +
+    'Можно нажать «🧬 Создать персонажа» ниже или написать героя своими словами.\n' +
     'Например: «Я — эльф-плут Кейр, Преступник. Тёмное фэнтези, город на болоте. Начинаю в камере.»\n\n' +
     'Мастер выставит характеристики, навыки, умения. XP за убийства и квесты начисляется автоматически.\n' +
     'Письма, документы и слухи — в отдельной вкладке 📝 Заметки.');
+  const createButton = document.createElement('button');
+  createButton.type = 'button';
+  createButton.className = 'btn primary';
+  createButton.dataset.createCharacter = '1';
+  createButton.textContent = '🧬 Создать персонажа · раса, класс, предыстория';
+  createButton.style.alignSelf = 'center';
+  createButton.onclick = () => openCharacterCreator();
+  chatEl.appendChild(createButton);
 }
 function renderWorlds() {
   const container = document.getElementById('worlds-section');
@@ -1447,15 +1593,7 @@ function renderWorlds() {
       if (!world || busy) return;
       drawerEl.classList.remove('open');
       drawerBg.classList.remove('open');
-      messages = []; state = {...EMPTY_STATE}; memory = {};
-      try { localStorage.removeItem(AVATAR_KEY + '_' + authUser); } catch(e){}
-      ttsStop();
-      chatEl.innerHTML = '';
-      renderStatus();
-      addMsg('system', `Выбран мир: ${world.name}\n${world.desc}\n\nОпишите персонажа: раса, класс, имя, предыстория.`);
-      messages.push({role: 'user', content: world.prompt + ' Если я не описал персонажа — сначала предложи 2–3 варианта расы, класса и предыстории на выбор.'});
-      persist();
-      callAI(messages);
+      openCharacterCreator(world);
     };
   });
 }
@@ -1579,6 +1717,7 @@ document.querySelectorAll('#drawer .btn[data-action]').forEach(btn => {
     const a = btn.dataset.action;
     if (a === 'dice') doRoll('1d20');
     else if (a === 'dice-custom') rollModal().then(v => { if (v) doRoll(v); });
+    else if (a === 'create') openCharacterCreator();
     else if (a === 'sheet') doSheet();
     else if (a === 'skills') doSkills();
     else if (a === 'notes') doNotes();
@@ -1587,7 +1726,7 @@ document.querySelectorAll('#drawer .btn[data-action]').forEach(btn => {
     else if (a === 'manage-saves') manageSaves();
     else if (a === 'reset') doReset();
     else if (a === 'help') doHelp();
-    else if (a === 'logout') { try { sessionStorage.removeItem(AUTH_KEY); } catch(e){} location.reload(); }
+    else if (a === 'logout') logoutAccount();
   };
 });
 

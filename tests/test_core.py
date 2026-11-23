@@ -93,6 +93,8 @@ class CoreTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(prefix='rpg-test-')
         app.SAVES_DIR = Path(self.tmp.name)
+        app.DB_PATH = app.SAVES_DIR / "accounts.sqlite3"
+        app.init_account_db()
         app.client.calls.clear()
         app.client.responses.clear()
         request.data = {}
@@ -155,6 +157,111 @@ class CoreTests(unittest.TestCase):
         app.migrate_legacy_saves()
         self.assertTrue((app.SAVES_DIR/'owner'/'старый.json').exists())
         self.assertTrue((app.SAVES_DIR/'owner'/'старый.bak.json').exists())
+
+    def test_register_login_and_logout_with_hashed_password(self):
+        request.remote_addr = '192.0.2.11'
+        request.data = {'username': ' Иван_123 ', 'password': 'long-password-123'}
+        created, status = app.api_auth_register()
+        self.assertEqual(status, 201)
+        self.assertEqual(created['user'], 'иван_123')
+        self.assertGreaterEqual(len(created['token']), 32)
+        with app.account_db() as db:
+            row = db.execute('SELECT password_hash FROM users WHERE username=?',
+                             ('иван_123',)).fetchone()
+            self.assertNotEqual(row['password_hash'], request.data['password'])
+            self.assertTrue(app.verify_password('long-password-123', row['password_hash']))
+        request.headers = {'Authorization': 'Bearer ' + created['token']}
+        self.assertIsNone(app.require_api_token())
+        self.assertEqual(app.api_auth_check()['user'], 'иван_123')
+        request.data = {'name': 'Приключение', 'messages': [], 'memory': {}}
+        app.api_save()
+        self.assertTrue((app.SAVES_DIR/'иван_123'/'Приключение.json').exists())
+        request.data = {'username': 'ИВАН_123', 'password': 'wrong-pass'}
+        self.assertEqual(app.api_auth_login()[1], 401)
+        request.data['password'] = 'long-password-123'
+        logged_in = app.api_auth_login()
+        self.assertTrue(logged_in['ok'])
+        request.headers = {'Authorization': 'Bearer ' + logged_in['token']}
+        self.assertIsNone(app.require_api_token())
+        self.assertEqual(app.api_saves_list(), ['Приключение'])
+        self.assertTrue(app.api_auth_logout()['ok'])
+        self.assertEqual(app.require_api_token()[1], 401)
+        # Accounts and saves survive reopening the SQLite connection.
+        app.init_account_db()
+        request.data = {'username': 'иван_123', 'password': 'long-password-123'}
+        self.assertEqual(app.api_auth_login()['user'], 'иван_123')
+
+    def test_register_checks_duplicate_reserved_and_password_rules(self):
+        request.remote_addr = '192.0.2.12'
+        request.data = {'username': 'owner', 'password': 'a-valid-password'}
+        self.assertEqual(app.api_auth_register()[1], 409)
+        request.data['username'] = 'alice'  # Reserved legacy username.
+        self.assertEqual(app.api_auth_register()[1], 409)
+        request.data['username'] = '../alice'
+        self.assertEqual(app.api_auth_register()[1], 400)
+        request.data['username'] = 'hero_1'
+        request.data['password'] = '1234'
+        self.assertEqual(app.api_auth_register()[1], 400)
+        request.data['password'] = 'abcdefgh1234'
+        self.assertEqual(app.api_auth_register()[1], 201)
+        self.assertEqual(app.api_auth_register()[1], 409)
+
+    def test_registration_invitation_and_disabled_flag(self):
+        request.remote_addr = '192.0.2.13'
+        request.data = {'username': 'katya', 'password': 'abcdefgh1234'}
+        with patch.object(app, 'REGISTRATION_CODE', 'invitation-code'):
+            self.assertEqual(app.api_auth_register()[1], 403)
+            request.data['invite_code'] = 'invitation-code'
+            self.assertEqual(app.api_auth_register()[1], 201)
+        with patch.object(app, 'REGISTRATION_ENABLED', False):
+            request.data['username'] = 'masha'
+            self.assertEqual(app.api_auth_register()[1], 403)
+        self.assertEqual(app.api_auth_config()['registration_enabled'], True)
+
+    def test_registration_rate_limit_and_login_attempt_limit(self):
+        request.remote_addr = '192.0.2.14'
+        for i in range(8):
+            request.data = {'username': f'user{i:03}', 'password': 'abcdefgh1234'}
+            self.assertEqual(app.api_auth_register()[1], 201)
+        request.data['username'] = 'anotheruser'
+        self.assertEqual(app.api_auth_register()[1], 429)
+        request.remote_addr = '192.0.2.15'
+        request.data = {'username': 'user000', 'password': 'invalid'}
+        for _ in range(12):
+            self.assertEqual(app.api_auth_login()[1], 401)
+        self.assertEqual(app.api_auth_login()[1], 429)
+
+    def test_owner_login_compatibility_and_cross_user_saves(self):
+        request.remote_addr = '192.0.2.16'
+        request.data = {'username': 'owner', 'password': 'token-owner'}
+        owner = app.api_auth_login()
+        self.assertEqual(owner['user'], 'owner')
+        request.headers = {'Authorization': 'Bearer ' + owner['token']}
+        self.assertIsNone(app.require_api_token())
+        request.data = {'name': 'Только владелец', 'messages': []}
+        app.api_save()
+        request.data = {'username': 'solo', 'password': 'long-password-for-solo'}
+        solo, status = app.api_auth_register()
+        self.assertEqual(status, 201)
+        request.headers = {'Authorization': 'Bearer ' + solo['token']}
+        self.assertIsNone(app.require_api_token())
+        self.assertEqual(app.api_saves_list(), [])
+        self.assertEqual(app.api_load('Только владелец')[1], 404)
+        self.assertFalse((app.SAVES_DIR/'solo'/'Только_владелец.json').exists())
+
+    def test_ai_rate_limits_apply_across_users_with_global_cap(self):
+        with patch.object(app, 'AI_CALLS_PER_HOUR', 1), patch.object(app, 'AI_GLOBAL_CALLS_PER_HOUR', 2):
+            request.path = '/api/chat'
+            self.as_user('alice', 'token-alice')
+            request.path = '/api/chat'
+            self.assertIsNone(app.require_api_token())
+            self.assertEqual(app.require_api_token()[1], 429)  # Alice limit
+            self.as_user('bob', 'token-bob')
+            request.path = '/api/chat'
+            self.assertIsNone(app.require_api_token())
+            self.as_user('owner', 'token-owner')
+            request.path = '/api/chat'
+            self.assertEqual(app.require_api_token()[1], 429)  # Global limit
 
     def test_state_patch_can_remove_items_and_xp_is_not_duplicated(self):
         current = {'xp':20,'xp_event_ids':[],'level':1,'hp':10,'max_hp':10,

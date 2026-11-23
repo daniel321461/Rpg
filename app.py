@@ -7,6 +7,9 @@ import tempfile
 import time
 import hmac
 import unicodedata
+import secrets
+import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
 
 from flask import Flask, request, jsonify, Response, render_template, g
@@ -54,8 +57,8 @@ BASE_DIR = Path(__file__).resolve().parent
 SAVES_DIR = Path(os.getenv("RPG_SAVES_DIR", str(BASE_DIR / "saves"))).expanduser().resolve()
 SAVES_DIR.mkdir(parents=True, exist_ok=True)
 
-# Each browser supplies a per-user bearer token. No public save or AI endpoints.
-# JSON example: RPG_USERS_JSON={"alice":"random-secret-A","bob":"random-secret-B"}
+# Registration and credentials are stored in a SQLite database in RPG_SAVES_DIR.
+# Without a Railway Volume, *both accounts and saves* disappear on redeploy.
 try:
     AUTH_USERS = json.loads(os.getenv("RPG_USERS_JSON", "{}"))
 except json.JSONDecodeError as exc:
@@ -71,6 +74,101 @@ UNSAFE_LOCAL = os.getenv("RPG_ALLOW_UNSAFE_LOCAL", "").lower() in ("1", "true", 
 if not AUTH_USERS and not UNSAFE_LOCAL:
     raise RuntimeError("Для защиты API задайте RPG_ACCESS_TOKEN (или RPG_USERS_JSON).")
 
+REGISTRATION_ENABLED = os.getenv("RPG_REGISTRATION_ENABLED", "1").lower() not in ("0", "false", "no")
+REGISTRATION_CODE = os.getenv("RPG_REGISTRATION_CODE", "")
+AI_CALLS_PER_HOUR = max(10, int(os.getenv("RPG_AI_CALLS_PER_HOUR", "180")))
+AI_GLOBAL_CALLS_PER_HOUR = max(10, int(os.getenv("RPG_AI_GLOBAL_CALLS_PER_HOUR", "450")))
+SESSION_TTL = 30 * 24 * 3600
+DB_PATH = SAVES_DIR / "accounts.sqlite3"
+USERNAME_RE = re.compile(r"[\w-]{3,32}$", re.UNICODE)
+PASSWORD_MIN_LENGTH = 8
+
+
+@contextmanager
+def account_db():
+    connection = sqlite3.connect(str(DB_PATH), timeout=15)
+    connection.row_factory = sqlite3.Row
+    try:
+        yield connection
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+
+
+def init_account_db():
+    with account_db() as db:
+        db.execute("""CREATE TABLE IF NOT EXISTS users (
+            username TEXT PRIMARY KEY, password_hash TEXT NOT NULL, created_at INTEGER NOT NULL
+        )""")
+        db.execute("""CREATE TABLE IF NOT EXISTS sessions (
+            token_hash TEXT PRIMARY KEY, username TEXT NOT NULL, expires_at INTEGER NOT NULL
+        )""")
+        db.execute("""CREATE TABLE IF NOT EXISTS rate_limits (
+            bucket TEXT PRIMARY KEY, window_start INTEGER NOT NULL, hits INTEGER NOT NULL
+        )""")
+
+
+init_account_db()
+
+
+def normalized_username(raw):
+    if not isinstance(raw, str):
+        return None
+    name = unicodedata.normalize("NFKC", raw).strip().casefold()
+    if not USERNAME_RE.fullmatch(name) or len(name) > 32:
+        return None
+    return name
+
+
+def password_hash(password):
+    # PBKDF2-HMAC with a fresh random salt; no plaintext passwords in SQLite.
+    salt = secrets.token_bytes(16)
+    rounds = 360_000
+    derived = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, rounds)
+    return f"pbkdf2_sha256${rounds}${salt.hex()}${derived.hex()}"
+
+
+def verify_password(password, stored):
+    try:
+        algorithm, rounds, salt, expected = stored.split("$", 3)
+        if algorithm != "pbkdf2_sha256" or not 100_000 <= int(rounds) <= 1_000_000:
+            return False
+        derived = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"),
+                                     bytes.fromhex(salt), int(rounds))
+        return hmac.compare_digest(derived, bytes.fromhex(expected))
+    except (AttributeError, TypeError, ValueError):
+        return False
+
+
+def use_quota(bucket, allowed, seconds):
+    """Simple process-safe rate limiter shared by Gunicorn workers."""
+    now = int(time.time())
+    with account_db() as db:
+        db.execute("BEGIN IMMEDIATE")
+        row = db.execute("SELECT window_start, hits FROM rate_limits WHERE bucket=?",
+                         (bucket,)).fetchone()
+        if not row or row["window_start"] + seconds <= now:
+            db.execute("INSERT INTO rate_limits (bucket, window_start, hits) VALUES (?,?,1) "
+                       "ON CONFLICT(bucket) DO UPDATE SET window_start=excluded.window_start, hits=1",
+                       (bucket, now))
+            return True
+        if row["hits"] >= allowed:
+            return False
+        db.execute("UPDATE rate_limits SET hits=hits+1 WHERE bucket=?", (bucket,))
+        return True
+
+
+def session_token_for(username):
+    token = secrets.token_urlsafe(32)
+    now = int(time.time())
+    with account_db() as db:
+        db.execute("INSERT INTO sessions(token_hash, username, expires_at) VALUES (?,?,?)",
+                   (hashlib.sha256(token.encode()).hexdigest(), username, now + SESSION_TTL))
+    return token
+
 
 def user_saves_dir():
     folder = SAVES_DIR / g.current_user
@@ -80,20 +178,101 @@ def user_saves_dir():
 
 @app.before_request
 def require_api_token():
-    if not request.path.startswith("/api/") or request.path == "/api/health":
+    public = {"/api/health", "/api/auth/login", "/api/auth/register", "/api/auth/config"}
+    if not request.path.startswith("/api/") or request.path in public:
         return None
     if not AUTH_USERS and UNSAFE_LOCAL:
         if request.remote_addr not in ("127.0.0.1", "::1"):
             return jsonify({"error": "Локальный режим доступен только с этого компьютера."}), 403
         g.current_user = "owner"
         return None
-    username = request.headers.get("X-RPG-User", "owner")
     auth = request.headers.get("Authorization", "")
-    expected = AUTH_USERS.get(username)
-    if not expected or not auth.startswith("Bearer ") or not hmac.compare_digest(auth[7:], expected):
-        return jsonify({"error": "Требуется вход. Проверьте имя и секретный ключ."}), 401
-    g.current_user = username
+    if not auth.startswith("Bearer ") or len(auth) > 512:
+        return jsonify({"error": "Требуется вход в аккаунт."}), 401
+    token = auth[7:]
+    token_digest = hashlib.sha256(token.encode()).hexdigest()
+    with account_db() as db:
+        row = db.execute("SELECT username FROM sessions WHERE token_hash=? AND expires_at>?",
+                         (token_digest, int(time.time()))).fetchone()
+    if row:
+        g.current_user = row["username"]
+    else:
+        # Compatibility for older clients using manually configured owner keys.
+        username = request.headers.get("X-RPG-User", "owner")
+        expected = AUTH_USERS.get(username)
+        if not expected or not hmac.compare_digest(token, expected):
+            return jsonify({"error": "Сеанс истёк. Войдите заново."}), 401
+        g.current_user = username
+    if request.path in ("/api/chat", "/api/state", "/api/memory"):
+        if not use_quota("ai:user:" + g.current_user, AI_CALLS_PER_HOUR, 3600):
+            return jsonify({"error": "Достигнут личный лимит ИИ-запросов за час. Попробуйте позже."}), 429
+        if not use_quota("ai:global", AI_GLOBAL_CALLS_PER_HOUR, 3600):
+            return jsonify({"error": "Общий лимит ИИ-запросов за час исчерпан. Попробуйте позже."}), 429
     return None
+
+
+@app.route("/api/auth/config")
+def api_auth_config():
+    return jsonify({"registration_enabled": REGISTRATION_ENABLED,
+                    "invite_required": bool(REGISTRATION_CODE)})
+
+
+@app.route("/api/auth/register", methods=["POST"])
+def api_auth_register():
+    if not REGISTRATION_ENABLED:
+        return jsonify({"error": "Регистрация временно закрыта."}), 403
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "Укажите логин и пароль."}), 400
+    username = normalized_username(data.get("username"))
+    password = data.get("password")
+    if not username:
+        return jsonify({"error": "Логин: 3–32 символа, буквы, цифры, _ или -."}), 400
+    if username in ("owner", "admin", "root") or any(
+        username == u.casefold() for u in AUTH_USERS
+    ):
+        return jsonify({"error": "Это имя уже занято."}), 409
+    if not isinstance(password, str) or not PASSWORD_MIN_LENGTH <= len(password) <= 128:
+        return jsonify({"error": "Пароль должен содержать от 8 до 128 символов."}), 400
+    if REGISTRATION_CODE and not hmac.compare_digest(str(data.get("invite_code", "")), REGISTRATION_CODE):
+        return jsonify({"error": "Неверный код приглашения."}), 403
+    if not use_quota("register:" + str(request.remote_addr), 8, 3600):
+        return jsonify({"error": "Слишком много регистраций. Попробуйте позже."}), 429
+    hashed = password_hash(password)
+    with account_db() as db:
+        try:
+            db.execute("INSERT INTO users(username, password_hash, created_at) VALUES(?,?,?)",
+                       (username, hashed, int(time.time())))
+        except sqlite3.IntegrityError:
+            return jsonify({"error": "Это имя уже занято."}), 409
+    return jsonify({"ok": True, "user": username, "token": session_token_for(username)}), 201
+
+
+@app.route("/api/auth/login", methods=["POST"])
+def api_auth_login():
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "Укажите логин и пароль."}), 400
+    username = normalized_username(data.get("username"))
+    password = data.get("password")
+    if not username or not isinstance(password, str) or len(password) > 128:
+        return jsonify({"error": "Неверный логин или пароль."}), 401
+    if not use_quota("login:" + str(request.remote_addr) + ":" + username, 12, 900):
+        return jsonify({"error": "Слишком много попыток. Повторите вход через 15 минут."}), 429
+    with account_db() as db:
+        account = db.execute("SELECT password_hash FROM users WHERE username=?", (username,)).fetchone()
+    if account:
+        valid = verify_password(password, account["password_hash"])
+    else:
+        # Optional legacy Railway credentials: owner and RPG_USERS_JSON.
+        legacy_username = next((u for u in AUTH_USERS if u.casefold() == username), None)
+        expected = AUTH_USERS.get(legacy_username) if legacy_username else None
+        valid = bool(expected and hmac.compare_digest(password, expected))
+        if valid:
+            username = legacy_username
+    if not valid:
+        return jsonify({"error": "Неверный логин или пароль."}), 401
+    return jsonify({"ok": True, "user": username, "token": session_token_for(username)})
 
 
 @app.route("/api/auth/check")
@@ -101,8 +280,17 @@ def api_auth_check():
     return jsonify({"ok": True, "user": g.current_user})
 
 
-# Owner-only legacy migration: existing saves/NAME.json remain accessible after upgrade.
-# Do not overwrite any already-migrated save file.
+@app.route("/api/auth/logout", methods=["POST"])
+def api_auth_logout():
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer "):
+        digest = hashlib.sha256(auth[7:].encode()).hexdigest()
+        with account_db() as db:
+            db.execute("DELETE FROM sessions WHERE token_hash=?", (digest,))
+    return jsonify({"ok": True})
+
+
+# Owner-only legacy migration. Never overwrite an already-migrated save file.
 def migrate_legacy_saves():
     folder = SAVES_DIR / "owner"
     folder.mkdir(mode=0o700, parents=True, exist_ok=True)
