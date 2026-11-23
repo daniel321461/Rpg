@@ -507,7 +507,7 @@ function localPortrait(st, seed) {
     // Custom ancestry has no assumed anatomy. Use a heraldic badge offline.
     poly('#c69b62',[48,14],[70,24],[66,54],[48,69],[30,54],[26,24]);
     oval(robe,48,39,17,18); g.fillStyle='#fff0cf'; g.textAlign='center';
-    g.font='bold 20px serif'; g.fillText(Array.from(st.race.trim())[0].toUpperCase(),48,46);
+    g.font='bold 20px serif'; g.fillText(Array.from(st.race?.trim() || st.name.trim())[0].toUpperCase(),48,46);
     return canvas.toDataURL();
   }
   const w = wide?23:kind==='kobold'?16:19;
@@ -556,7 +556,7 @@ async function generateAvatar(force = false) {
   const wrap = document.querySelector('.avatar-wrap');
   if (!wrap) return;
   const st = state;
-  if (!st?.name || st.name === 'Пустой' || !st.race?.trim()) {
+  if (!st?.name || st.name === 'Пустой') {
     avatarRequest++; currentAvatar = null; return;
   }
   const saved = !force && cachedAvatarFor(st);
@@ -591,8 +591,8 @@ async function generateAvatar(force = false) {
   try { localStorage.setItem(AVATAR_KEY,JSON.stringify(data)); } catch(e){}
 }
 function openAvatarModal() {
-  if (!state?.name || state.name === 'Пустой' || !state.race?.trim()) {
-    addMsg('system', 'Для портрета укажите имя и расу персонажа.');
+  if (!state?.name || state.name === 'Пустой') {
+    addMsg('system', 'Для портрета укажите имя персонажа.');
     return;
   }
   const cached = cachedAvatarFor(state);
@@ -916,40 +916,49 @@ async function callAI(msgs) {
   document.querySelectorAll('.quick-btn').forEach(b => b.disabled = false);
   inputEl.focus();
 }
-async function updateState() {
+async function updateState(repair = false) {
+  const session = messages;
   if (!state) state = {...EMPTY_STATE};
   try {
     const res = await fetch('/api/state', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({messages, state})
+      body: JSON.stringify({messages, state, repair})
     });
-    if (res.ok) {
-      const oldLevel = Number(state.level || 1);
-      state = await res.json();
-      if (Number(state.level || 1) > oldLevel) {
-        const gained = Number(state.level) - oldLevel;
-        addMsg('system', `🎉 Доступно повышение уровня: ${state.level} (получено уровней: ${gained}). Обсуди с мастером выбор повышения характеристик и умения.`);
-      }
-      renderStatus(); persist();
-      // Persist a rolling summary in the browser save so old turns are not resent forever.
-      // This endpoint calls the summarizer only after the threshold is crossed.
-      if (messages.filter(m => m.role === 'user' || m.role === 'assistant').length > 30) {
-        try {
-          const compactRes = await fetch('/api/compact', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({messages})
-          });
-          if (compactRes.ok) {
-            const compactData = await compactRes.json();
-            if (compactData.compacted && Array.isArray(compactData.messages)) {
-              messages = compactData.messages;
-              persist();
-            }
-          }
-        } catch(compactError) { console.warn('History compaction skipped:', compactError); }
-      }
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const oldLevel = Number(state.level || 1);
+    const updated = await res.json();
+    if (messages !== session) return;
+    state = updated;
+    if (Number(state.level || 1) > oldLevel) {
+      const gained = Number(state.level) - oldLevel;
+      addMsg('system', `🎉 Доступно повышение уровня: ${state.level} (получено уровней: ${gained}). Обсуди с мастером выбор повышения характеристик и умения.`);
     }
-  } catch(e){}
+    renderStatus(); persist();
+    if (res.headers.get('X-Sheet-Sync') === 'failed') throw new Error('модель не вернула данные листа');
+    if (repair) {
+      addMsg('system', 'Сверка с историей завершена. Откройте /skills для просмотра умений.');
+      return;
+    }
+    // Persist a rolling summary in the browser save so old turns are not resent forever.
+    // This endpoint calls the summarizer only after the threshold is crossed.
+    if (messages.filter(m => m.role === 'user' || m.role === 'assistant').length > 30) {
+      try {
+        const compactRes = await fetch('/api/compact', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({messages})
+        });
+        if (compactRes.ok) {
+          const compactData = await compactRes.json();
+          if (compactData.compacted && Array.isArray(compactData.messages)) {
+            messages = compactData.messages;
+            persist();
+          }
+        }
+      } catch(compactError) { console.warn('History compaction skipped:', compactError); }
+    }
+  } catch(e) {
+    if (messages === session) addMsg('system', 'Не удалось обновить лист (' + e.message + '). Для повторной сверки введите /sync.');
+  }
 }
 
 /* SEND */
@@ -972,6 +981,10 @@ async function sendMessage(text) {
 function handleCommand(cmd, arg) {
   switch(cmd) {
     case '/roll': return doRoll(arg || '1d20');
+    case '/sync':
+      if (!messages.length) return addMsg('system', 'Сначала опишите персонажа.');
+      busy = true;
+      return updateState(true).finally(() => { busy = false; });
     case '/sheet': return doSheet();
     case '/skills': return doSkills();
     case '/notes': return doNotes();
@@ -1266,13 +1279,15 @@ async function doSkills() {
     ? state.proficiencies.map(p => `<span class="tag">${esc(p)}</span>`).join('')
     : '<span class="tag empty">нет владений</span>';
   const skills = (state.skills || []).length
-    ? state.skills.map(sk => {
-        const bonus = sk.bonus >= 0 ? '+' + sk.bonus : '' + sk.bonus;
+    ? state.skills.filter(Boolean).map(sk => {
+        if (typeof sk === "string") sk = {name: sk};
+        const bonus = sk.bonus == null ? '' : sk.bonus >= 0 ? '+' + sk.bonus : '' + sk.bonus;
         return `<span class="tag skill" title="${esc(sk.source || '')}">${esc(sk.name)} ${bonus}</span>`;
       }).join('')
     : '<span class="tag empty">нет навыков</span>';
   const abilities = (state.abilities || []).length
-    ? state.abilities.map(a => {
+    ? state.abilities.filter(Boolean).map(a => {
+        if (typeof a === "string") a = {name: a};
         const isPassive = a.recharge === 'passive' || !a.uses_max;
         const usesText = isPassive ? '∞' : `${a.uses_left ?? a.uses_max}/${a.uses_max}`;
         const isEmpty = !isPassive && (a.uses_left || 0) === 0;
@@ -1401,6 +1416,7 @@ function doReset() {
 function doHelp() {
   addHtmlMsg('system', 'Команды:<br><code>/roll 1d20+3</code> — бросок<br>' +
     '<code>/sheet</code> — полный лист<br><code>/skills</code> — умения и навыки<br>' +
+    '<code>/sync</code> — восстановить данные персонажа из истории<br>' +
     '<code>/notes</code> — заметки, письма, документы<br>' +
     '<code>/save имя</code> — сохранить<br><code>/load имя</code> — загрузить<br>' +
     '<code>/reset</code> — новая игра<br><br>' +

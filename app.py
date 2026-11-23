@@ -358,18 +358,19 @@ XP начисляется сервером только из новых репл
 - HP не превышает max_hp.
 - Инвентарь — без дублей.
 
+NAME: укажи подтверждённое имя героя из описания игрока или листа мастера. Предложенные варианты и имена NPC пропускай.
 RACE, CLASS, BACKGROUND: сохрани, если уже есть. Меняй только при событии в игре.
 
 STATS: если раса/класс только появились и все 10 — выставь по классу + расовые бонусы. Если уже не 10 — не пересчитывай.
 
 PROFICIENCIES: массив строк. Формируется ОДИН РАЗ. Максимум 12.
 
-SKILLS: массив {"name":"Скрытность","bonus":5,"source":"Плут"}. ОДИН РАЗ, 6–8 навыков.
+SKILLS: массив {"name":"Скрытность","bonus":5,"source":"Плут"}. При создании героя заполни 6–8 навыков с учётом выбора игрока. Обновляй бонусы и добавляй изученные навыки.
 
 ABILITIES: массив {"name":"Ярость","description":"...","uses_max":2,"uses_left":2,"recharge":"long_rest"}.
 recharge: passive (uses_max=0), short_rest, long_rest, day.
 uses_left уменьшай при использовании, восстанавливай при отдыхе.
-Назначай ОДИН РАЗ, 5–6 умений.
+При создании героя заполни 5–6 умений по классу. Затем включай все полученные умения и обновляй оставшиеся применения.
 
 DC_MODIFIER: только реальные причины. Нейтрально → 0, [].
 
@@ -405,7 +406,7 @@ SUMMARY_PROMPT = """
 - Решения и последствия
 - Открытые вопросы, цели, долги
 - Факты мира
-- Расу, класс, предысторию, характеристики
+- Имя героя, расу, класс, предысторию, характеристики, навыки, умения и владения
 - Текущий XP, уровень, активные квесты и их этапы
 - Активные заметки (письма, документы — их суть)
 - Текущее положение
@@ -437,7 +438,7 @@ DEFAULT_STATE = {
 # Both values remain configurable through Railway environment variables.
 MAX_MESSAGES_BEFORE_SUMMARY = int(os.getenv("RPG_SUMMARY_THRESHOLD", "30"))
 KEEP_RECENT = int(os.getenv("RPG_KEEP_RECENT_MESSAGES", "8"))
-STATE_EXTRACT_EVERY_TURNS = max(1, int(os.getenv("RPG_STATE_EVERY_TURNS", "5")))
+STATE_EXTRACT_EVERY_TURNS = max(1, int(os.getenv("RPG_STATE_EVERY_TURNS", "1")))
 STATE_CONTEXT_MESSAGES = max(4, min(12, int(os.getenv("RPG_STATE_CONTEXT_MESSAGES", "6"))))
 
 
@@ -491,7 +492,7 @@ def roll_dice(expr):
 
 
 def clean_json(text):
-    text = text.strip()
+    text = text.rsplit("</think>", 1)[-1].strip()
     text = re.sub(r"^```(?:json)?\s*", "", text)
     text = re.sub(r"\s*```$", "", text)
     start = text.find("{")
@@ -576,7 +577,7 @@ def legacy_message_event_id(message, index):
     return hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()
 
 
-def extract_state(messages, current_state):
+def extract_state(messages, current_state, repair=False):
     current = dict(DEFAULT_STATE)
     if isinstance(current_state, dict):
         current.update(current_state)
@@ -615,36 +616,56 @@ def extract_state(messages, current_state):
         r"(?:квест\s+(?:заверш[её]н|выполнен)|уровень\s+повышен|"
         r"добавлено\s+в\s+инвентарь|удалено\s+из\s+инвентаря|"
         r"получено\s+\d+\s+(?:золот|монет)|потрачено\s+\d+\s+(?:золот|монет)|"
-        r"создан\s+персонаж|лист\s+персонажа)",
+        r"навык|умени|владени|способност|отдых|создан\s+персонаж|лист\s+персонажа)",
         re.IGNORECASE,
     )
     first_character_setup = current.get("name") in (None, "", "Пустой")
-    should_extract = first_character_setup or counter % STATE_EXTRACT_EVERY_TURNS == 0 or bool(event_pattern.search(last_assistant))
+    incomplete = first_character_setup or not current.get("skills") or not current.get("abilities")
+    should_extract = repair or incomplete or counter % STATE_EXTRACT_EVERY_TURNS == 0 or bool(event_pattern.search(last_assistant))
     new_state = {}
     if should_extract:
-        recent = messages[-STATE_CONTEXT_MESSAGES:]
+        history = [m for m in messages if m.get("role") in ("user", "assistant")
+                   or str(m.get("content", "")).startswith("[РЕЗЮМЕ ПРОШЛОГО]")]
+        recent = history if repair or incomplete else history[-STATE_CONTEXT_MESSAGES:]
         dialogue = "\n".join(f"{m['role']}: {m['content']}" for m in recent if m.get("content"))
         # Avoid sending the internal cadence counter to the model.
         model_state = {k: v for k, v in current.items() if k != "state_extract_counter"}
         prompt = (f"ТЕКУЩЕЕ СОСТОЯНИЕ:\n{json.dumps(model_state, ensure_ascii=False)}\n\n"
                   f"ДИАЛОГ ПОСЛЕДНИХ ХОДОВ:\n{dialogue}\n\nВерни обновлённое состояние JSON."
                   " Не меняй XP, уровень и xp_next; XP рассчитывается отдельно сервером.")
-        try:
-            resp = client.chat.completions.create(
-                model=STATE_MODEL,
-                messages=[{"role": "system", "content": STATE_EXTRACT_PROMPT},
-                         {"role": "user", "content": prompt}],
-                temperature=0.1,
-            )
-            new_state = clean_json(resp.choices[0].message.content or "")
-        except Exception:
-            app.logger.exception("Character state extraction failed")
-            new_state = {}
+        if repair:
+            prompt += " Восстанови актуальные имя, расу, класс, предысторию, владения, навыки и умения героя по сохранившейся истории."
+        for model in dict.fromkeys((STATE_MODEL, MODEL)):
+            try:
+                resp = client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "system", "content": STATE_EXTRACT_PROMPT},
+                              {"role": "user", "content": prompt}],
+                )
+                new_state = clean_json(resp.choices[0].message.content or "")
+                if not isinstance(new_state, dict) or not DEFAULT_STATE.keys() & new_state.keys():
+                    raise ValueError("В ответе нет полей листа")
+                break
+            except Exception:
+                app.logger.exception("Character state extraction failed")
+                new_state = {}
+    character_fields = ("name", "race", "class", "background", "proficiencies", "skills", "abilities")
+    if repair:
+        new_state = {k: v for k, v in new_state.items() if k in character_fields}
 
+    warning = should_extract and not new_state
     merged = dict(current)
     for k, v in new_state.items():
-        if v is not None:
-            merged[k] = v
+        if k not in DEFAULT_STATE or k in ("state_extract_counter", "xp_event_ids"):
+            continue
+        default = DEFAULT_STATE[k]
+        if type(default) is int:
+            try:
+                merged[k] = int(v)
+            except (TypeError, ValueError, OverflowError):
+                continue
+        elif isinstance(v, type(default)):
+            merged[k] = v.strip() if isinstance(v, str) else v
     # Preserve arrays when the model accidentally returns empty/missing arrays.
     for f in ("inventory", "notes", "quests", "conditions", "relationships", "faction_clocks",
               "dc_modifier_reasons", "proficiencies", "skills", "abilities", "level_history"):
@@ -672,6 +693,8 @@ def extract_state(messages, current_state):
             processed.append(event_id)
     merged["xp"] = xp
     merged["xp_event_ids"] = processed[-500:]
+    if not isinstance(merged.get("name"), str) or merged["name"].strip() in ("", "Пустой"):
+        merged["name"] = current.get("name") or "Пустой"
     # Protect core scalar values from blank/null model output.
     for f in ("name", "race", "class", "background", "position", "cover", "weapon_in_hand"):
         if not merged.get(f) and current.get(f):
@@ -692,7 +715,9 @@ def extract_state(messages, current_state):
         if not isinstance(merged.get(f), list): merged[f] = current.get(f, [])
     merged["quests"] = [q for q in (normalize_quest(x) for x in merged["quests"]) if q]
     merged["notes"] = [n for n in (normalize_note(x) for x in merged["notes"]) if n]
-    return merged
+    if repair:
+        merged = {**current_state, **{k: merged[k] for k in character_fields}}
+    return merged, warning
 
 
 @app.route("/api/health")
@@ -806,7 +831,11 @@ def api_state():
     state = data.get("state") or DEFAULT_STATE
     if not isinstance(messages, list) or not messages:
         return jsonify(state)
-    return jsonify(extract_state(messages, state))
+    updated, warning = extract_state(messages, state, repair=data.get("repair") is True)
+    response = jsonify(updated)
+    if warning:
+        response.headers["X-Sheet-Sync"] = "failed"
+    return response
 
 
 @app.route("/api/saves")
