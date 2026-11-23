@@ -3,6 +3,8 @@ import re
 import json
 import random
 import hashlib
+from urllib.parse import quote
+from urllib.request import Request, urlopen
 import tempfile
 from pathlib import Path
 
@@ -702,7 +704,32 @@ def api_health():
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", remote_avatars=bool(os.getenv("POLLINATIONS_API_KEY")))
+
+
+@app.post("/api/avatar")
+def api_avatar():
+    key = os.getenv("POLLINATIONS_API_KEY")
+    if not key:
+        return jsonify({"error": "Портреты создаются локально."}), 503
+    data = request.get_json(silent=True)
+    prompt = data.get("prompt") if isinstance(data, dict) else None
+    seed = data.get("seed") if isinstance(data, dict) else None
+    if not isinstance(prompt, str) or not 1 <= len(prompt) <= 1200 or type(seed) is not int or not 0 <= seed <= 999999:
+        return jsonify({"error": "Некорректные параметры портрета."}), 400
+    url = f"https://gen.pollinations.ai/image/{quote(prompt, safe='')}?width=256&height=256&seed={seed}"
+    upstream = Request(url, headers={"Authorization": f"Bearer {key}", "Accept": "image/*"})
+    try:
+        with urlopen(upstream, timeout=23) as result:
+            mime = result.headers.get_content_type()
+            if mime not in ("image/png", "image/jpeg", "image/webp"):
+                raise ValueError("image format")
+            image = result.read(2_000_001)
+            if not image or len(image) > 2_000_000:
+                raise ValueError("image size")
+            return Response(image, mimetype=mime)
+    except (OSError, ValueError):
+        return jsonify({"error": "Сервис портретов недоступен."}), 502
 
 
 @app.route("/api/roll", methods=["POST"])
