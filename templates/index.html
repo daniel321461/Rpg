@@ -431,15 +431,16 @@ function esc(s) {
   return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
-/* AUTH: one-time login password is never stored; short-lived opaque session token
-   stays only in sessionStorage, and is checked by the server for every API call. */
+/* AUTH: Only the opaque, ASCII-safe session token belongs in HTTP headers.
+   The server resolves the account from the session; names (including Cyrillic)
+   must never be sent via X-RPG-User or another HTTP header. */
 function authHeaders() {
-  return {'Authorization': 'Bearer ' + authToken, 'X-RPG-User': authUser};
+  return {'Authorization': 'Bearer ' + authToken};
 }
-async function checkAuth(user, token) {
+async function checkAuth(token) {
   try {
     const response = await fetch('/api/auth/check', {
-      headers: {'Authorization': 'Bearer ' + token, 'X-RPG-User': user},
+      headers: {'Authorization': 'Bearer ' + token},
       cache: 'no-store'
     });
     if (!response.ok) return null;
@@ -548,12 +549,12 @@ async function ensureAuth() {
   let saved;
   try { saved = JSON.parse(sessionStorage.getItem(AUTH_KEY) || 'null'); } catch(e) {}
   if (saved && saved.user && typeof saved.token === 'string') {
-    const user = await checkAuth(saved.user, saved.token);
+    const user = await checkAuth(saved.token);
     if (user) { authUser = user; authToken = saved.token; return true; }
     try { sessionStorage.removeItem(AUTH_KEY); } catch(e) {}
   }
   // Only local unsafe development mode may have no credentials.
-  const unauthenticatedUser = await checkAuth('owner', '');
+  const unauthenticatedUser = await checkAuth('');
   if (unauthenticatedUser) { authUser = unauthenticatedUser; authToken = ''; return true; }
   return showLogin();
 }
