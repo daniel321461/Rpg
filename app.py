@@ -312,7 +312,7 @@ STATE_EXTRACT_PROMPT = """
 Верни СТРОГО валидный JSON без markdown:
 {
   "name": "имя или Пустой",
-  "race": "", "class": "", "background": "", "appearance": "",
+  "race": "", "class": "", "background": "",
   "level": 1, "xp": 0, "xp_next": 100,
   "hp": 10, "max_hp": 10, "gold": 0,
   "stats": {"str":10,"dex":10,"con":10,"int":10,"wis":10,"cha":10},
@@ -357,7 +357,6 @@ XP начисляется сервером только из новых репл
 - Инвентарь — без дублей.
 
 RACE, CLASS, BACKGROUND: сохрани, если уже есть. Меняй только при событии в игре.
-APPEARANCE: кратко сохрани только явно описанную игроком внешность персонажа (возраст, телосложение, кожа, волосы, глаза, лицо, одежда, особые приметы). Не выдумывай детали; если описания нет — оставь пустую строку. Это поле нужно для портрета.
 
 STATS: если раса/класс только появились и все 10 — выставь по классу + расовые бонусы. Если уже не 10 — не пересчитывай.
 
@@ -417,7 +416,7 @@ SUMMARY_PROMPT = """
 DICE_RE = re.compile(r"^\s*(\d*)d(\d+)([+-]\d+)?\s*$", re.IGNORECASE)
 
 DEFAULT_STATE = {
-    "name": "Пустой", "race": "", "class": "", "background": "", "appearance": "",
+    "name": "Пустой", "race": "", "class": "", "background": "",
     "level": 1, "xp": 0, "xp_next": 100,
     "hp": 10, "max_hp": 10, "gold": 0,
     "stats": {"str": 10, "dex": 10, "con": 10, "int": 10, "wis": 10, "cha": 10},
@@ -432,8 +431,12 @@ DEFAULT_STATE = {
 }
 
 
-MAX_MESSAGES_BEFORE_SUMMARY = int(os.getenv("RPG_SUMMARY_THRESHOLD", "24"))
-KEEP_RECENT = int(os.getenv("RPG_KEEP_RECENT_MESSAGES", "10"))
+# Economy defaults: compact less often and retain a smaller recent window.
+# Both values remain configurable through Railway environment variables.
+MAX_MESSAGES_BEFORE_SUMMARY = int(os.getenv("RPG_SUMMARY_THRESHOLD", "30"))
+KEEP_RECENT = int(os.getenv("RPG_KEEP_RECENT_MESSAGES", "8"))
+STATE_EXTRACT_EVERY_TURNS = max(1, int(os.getenv("RPG_STATE_EVERY_TURNS", "5")))
+STATE_CONTEXT_MESSAGES = max(4, min(12, int(os.getenv("RPG_STATE_CONTEXT_MESSAGES", "6"))))
 
 
 def summarize_old_messages(messages):
@@ -598,14 +601,15 @@ def extract_state(messages, current_state):
         if matches:
             fresh_events.append((event_id, sum(matches)))
 
-    # Keep the expensive state parser off the hot path: run every 3 player turns,
-    # and immediately when the latest GM reply appears to contain a state-changing event.
+    # XP is processed deterministically below and must NOT trigger the costly
+    # state-extraction LLM call. Run the state parser on cadence or on non-XP
+    # events that can change the character sheet.
     counter = max(0, int(current.get("state_extract_counter", 0) or 0)) + 1
     current["state_extract_counter"] = counter
     last_assistant = next((m.get("content", "") for m in reversed(messages)
                            if m.get("role") == "assistant"), "")
     event_pattern = re.compile(
-        r"\+\s*\d+\s*XP|\b(?:HP|ХП)\s*\d+|"
+        r"\b(?:HP|ХП)\s*\d+|"
         r"(?:квест\s+(?:заверш[её]н|выполнен)|уровень\s+повышен|"
         r"добавлено\s+в\s+инвентарь|удалено\s+из\s+инвентаря|"
         r"получено\s+\d+\s+(?:золот|монет)|потрачено\s+\d+\s+(?:золот|монет)|"
@@ -613,10 +617,10 @@ def extract_state(messages, current_state):
         re.IGNORECASE,
     )
     first_character_setup = current.get("name") in (None, "", "Пустой")
-    should_extract = first_character_setup or counter % 3 == 0 or bool(event_pattern.search(last_assistant))
+    should_extract = first_character_setup or counter % STATE_EXTRACT_EVERY_TURNS == 0 or bool(event_pattern.search(last_assistant))
     new_state = {}
     if should_extract:
-        recent = messages[-8:]
+        recent = messages[-STATE_CONTEXT_MESSAGES:]
         dialogue = "\n".join(f"{m['role']}: {m['content']}" for m in recent if m.get("content"))
         # Avoid sending the internal cadence counter to the model.
         model_state = {k: v for k, v in current.items() if k != "state_extract_counter"}
@@ -667,7 +671,7 @@ def extract_state(messages, current_state):
     merged["xp"] = xp
     merged["xp_event_ids"] = processed[-500:]
     # Protect core scalar values from blank/null model output.
-    for f in ("name", "race", "class", "background", "appearance", "position", "cover", "weapon_in_hand"):
+    for f in ("name", "race", "class", "background", "position", "cover", "weapon_in_hand"):
         if not merged.get(f) and current.get(f):
             merged[f] = current[f]
     merged["hp"] = max(0, min(int(merged.get("hp", 0) or 0), int(merged.get("max_hp", 1) or 1)))
@@ -678,7 +682,7 @@ def extract_state(messages, current_state):
     merged["level_pending"] = max(0, derived_level - previous_level)
     merged["gold"] = max(0, int(merged.get("gold", 0) or 0))
     merged["dc_modifier"] = int(merged.get("dc_modifier", 0) or 0)
-    for f in ("race", "class", "background", "appearance", "position", "cover", "weapon_in_hand"):
+    for f in ("race", "class", "background", "position", "cover", "weapon_in_hand"):
         if not isinstance(merged.get(f), str): merged[f] = current.get(f, DEFAULT_STATE[f])
     if not isinstance(merged.get("restrained"), bool): merged["restrained"] = bool(current.get("restrained", False))
     for f in ("inventory", "notes", "quests", "conditions", "relationships", "faction_clocks",
