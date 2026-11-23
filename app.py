@@ -356,7 +356,8 @@ XP начисляется сервером только из новых репл
 ОСНОВНЫЕ ПОЛЯ:
 - Не выдумывай событий.
 - HP не превышает max_hp.
-- Инвентарь — без дублей.
+- Если инвентарь изменился, верни inventory как ПОЛНЫЙ список оставшихся предметов. Сохрани прежние предметы, кроме явно потраченных, отданных или потерянных. После расхода последнего предмета верни []. Если изменений нет, пропусти поле inventory.
+- Предмет: {"name": "Зелье", "quantity": 2}. Объединяй одинаковые предметы, указывай оставшееся количество.
 
 NAME: укажи подтверждённое имя героя из описания игрока или листа мастера. Предложенные варианты и имена NPC пропускай.
 RACE, CLASS, BACKGROUND: сохрани, если уже есть. Меняй только при событии в игре.
@@ -503,17 +504,33 @@ def clean_json(text):
 
 
 def normalize_quest(q):
-    if isinstance(q, dict):
-        return q
     if isinstance(q, str):
-        return {
-            "id": "legacy-" + str(random.randint(1000, 9999)),
-            "name": q, "type": "side", "status": "active",
-            "chain": "", "chain_order": 0,
-            "stages": [], "current_stage": 0,
-            "rewards": {}, "giver": "", "location": ""
-        }
-    return None
+        q = {"name": q}
+    if not isinstance(q, dict):
+        return None
+    name = q.get("name") or q.get("title") or q.get("id")
+    if not isinstance(name, str) or not name.strip():
+        return None
+    return {**q, "name": name.strip()}
+
+
+def merge_quests(previous, updates):
+    quests = []
+    for entry in [*previous, *updates]:
+        quest = normalize_quest(entry)
+        if quest is None:
+            continue
+        for i, old in enumerate(quests):
+            same_id = quest.get("id") and quest["id"] == old.get("id")
+            same_name = quest["name"].casefold() == old["name"].casefold()
+            compatible_ids = any(not v or str(v).startswith("legacy-")
+                                 for v in (old.get("id"), quest.get("id")))
+            if same_id or (same_name and compatible_ids):
+                quests[i] = {**old, **quest}
+                break
+        else:
+            quests.append(quest)
+    return quests
 
 
 def normalize_note(n):
@@ -613,7 +630,7 @@ def extract_state(messages, current_state, repair=False):
                            if m.get("role") == "assistant"), "")
     event_pattern = re.compile(
         r"\b(?:HP|ХП)\s*\d+|"
-        r"(?:квест\s+(?:заверш[её]н|выполнен)|уровень\s+повышен|"
+        r"(?:квест|инвентар|уровень\s+повышен|"
         r"добавлено\s+в\s+инвентарь|удалено\s+из\s+инвентаря|"
         r"получено\s+\d+\s+(?:золот|монет)|потрачено\s+\d+\s+(?:золот|монет)|"
         r"навык|умени|владени|способност|отдых|создан\s+персонаж|лист\s+персонажа)",
@@ -667,7 +684,7 @@ def extract_state(messages, current_state, repair=False):
         elif isinstance(v, type(default)):
             merged[k] = v.strip() if isinstance(v, str) else v
     # Preserve arrays when the model accidentally returns empty/missing arrays.
-    for f in ("inventory", "notes", "quests", "conditions", "relationships", "faction_clocks",
+    for f in ("notes", "conditions", "relationships", "faction_clocks",
               "dc_modifier_reasons", "proficiencies", "skills", "abilities", "level_history"):
         old = current.get(f, [])
         new_items = merged.get(f, [])
@@ -713,7 +730,10 @@ def extract_state(messages, current_state, repair=False):
     for f in ("inventory", "notes", "quests", "conditions", "relationships", "faction_clocks",
               "dc_modifier_reasons", "proficiencies", "skills", "abilities", "level_history", "xp_event_ids"):
         if not isinstance(merged.get(f), list): merged[f] = current.get(f, [])
-    merged["quests"] = [q for q in (normalize_quest(x) for x in merged["quests"]) if q]
+    old_quests = current.get("quests")
+    updates = new_state.get("quests")
+    merged["quests"] = merge_quests(old_quests if isinstance(old_quests, list) else [],
+                                   updates if isinstance(updates, list) else [])
     merged["notes"] = [n for n in (normalize_note(x) for x in merged["notes"]) if n]
     if repair:
         merged = {**current_state, **{k: merged[k] for k in character_fields}}

@@ -198,7 +198,7 @@
   .kv .v { color: var(--text-primary); font-weight: 500; font-family: var(--font-serif); }
   .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
   .tag { background: var(--bg-card); padding: 5px 12px; border-radius: 6px; font-size: 13px; color: var(--text-secondary); border: 1px solid var(--border-subtle); }
-  .tag.empty { color: #5a5a4e; font-style: italic; }
+  .tag.empty { color: var(--text-secondary); font-style: italic; }
   .tag.skill { border-color: #4a3a6e; color: #b48cff; }
   .tag.ability { border-color: #5a3a2a; color: #e8c8a8; }
   .tag.warn { border-color: #5a3a2a; color: #d45a5a; background: #2a1f1a; }
@@ -225,7 +225,7 @@
   .ability-uses { font-size: 12px; font-family: monospace; color: var(--text-secondary); }
   .ability-uses.empty { color: #d45a5a; }
   .ability-desc { font-size: 12px; color: var(--text-secondary); line-height: 1.4; }
-  .ability-recharge { font-size: 10px; color: #5a5a4e; margin-top: 3px; font-style: italic; }
+  .ability-recharge { font-size: 10px; color: var(--text-secondary); margin-top: 3px; font-style: italic; }
   .ability-card.passive { border-color: #4a3a6e; }
   .ability-card.passive .ability-name { color: #b48cff; }
   .situation-box {
@@ -307,6 +307,8 @@
   <button class="quick-btn" data-quick="/roll 1d20">🎲 d20</button>
   <button class="quick-btn" id="quick-custom-roll">🎲 Свой</button>
   <button class="quick-btn" data-quick="/skills">🎯 Умения</button>
+  <button class="quick-btn" data-quick="/inventory">🎒 Инвентарь</button>
+  <button class="quick-btn" data-quick="/quests">🎯 Квесты</button>
   <button class="quick-btn" data-quick="/notes">📝 Заметки</button>
 </div>
 
@@ -987,6 +989,8 @@ function handleCommand(cmd, arg) {
       return updateState(true).finally(() => { busy = false; });
     case '/sheet': return doSheet();
     case '/skills': return doSkills();
+    case '/inventory': return openJournal('🎒 Инвентарь', inventoryHtml());
+    case '/quests': return openJournal('🎯 Квесты', questsHtml());
     case '/notes': return doNotes();
     case '/save': return doSave(arg);
     case '/load': return doLoad(arg);
@@ -1017,25 +1021,31 @@ async function doRoll(expr) {
 }
 
 /* SHEET */
-async function doSheet() {
-  if (!state) return;
-  const s = state.stats || {};
-  const quests = (state.quests || []).map(q => {
-    if (typeof q === 'string') {
-      return { id: 'old-' + q, name: q, type: 'side', status: 'active',
-               chain: '', chain_order: 0, stages: [], current_stage: 0,
-               rewards: {}, giver: '', location: '' };
-    }
-    return q;
-  });
+function itemLabel(item) {
+  if (typeof item === 'string') return item.trim();
+  if (!item || typeof item !== 'object') return '';
+  const name = item.name || item.title || item.item;
+  if (typeof name !== 'string') return '';
+  const qty = Number(item.quantity ?? item.qty ?? item.count ?? 1);
+  return Number.isFinite(qty) && qty > 1 ? name + ' × ' + qty : name;
+}
 
-  const inv = (state.inventory || []).length
-    ? state.inventory.map(i => `<span class="tag">${esc(i)}</span>`).join('')
-    : '<span class="tag empty">пусто</span>';
-  const cd = (state.conditions || []).length
-    ? state.conditions.map(c => `<span class="tag">${esc(c)}</span>`).join('')
-    : '<span class="tag empty">нет</span>';
+function inventoryHtml() {
+  const items = Array.isArray(state.inventory) ? state.inventory.map(itemLabel).filter(Boolean) : [];
+  const tags = items.map(i => `<span class="tag">${esc(i)}</span>`).join('');
+  return '<div class="tags">' + (tags || '<span class="tag empty">пусто</span>') + '</div>';
+}
 
+function questsHtml() {
+  const quests = (Array.isArray(state.quests) ? state.quests : [])
+    .map(q => typeof q === 'string' ? {name: q} : q)
+    .filter(q => q && typeof q === 'object')
+    .map(q => {
+      const status = String(q.status || '').trim().toLowerCase();
+      const completed = ['completed', 'done', 'выполнен', 'завершен', 'завершён'].includes(status);
+      const failed = ['failed', 'провален'].includes(status);
+      return {...q, status: completed ? 'completed' : failed ? 'failed' : 'active'};
+    });
   const typeInfo = {
     main: { icon: '⭐', label: 'Главный', color: '#c9a227' },
     side: { icon: '📜', label: 'Побочный', color: '#5a8ed4' },
@@ -1048,25 +1058,31 @@ async function doSheet() {
     const isCompleted = q.status === 'completed';
     const isFailed = q.status === 'failed';
     const statusIcon = isCompleted ? '✓' : (isFailed ? '✗' : '●');
-    const statusColor = isCompleted ? '#5a5a4e' : (isFailed ? '#d45a5a' : t.color);
-    const stages = (q.stages || []).map((st, i) => {
-      const mark = st.done ? '✓' : (i === (q.current_stage || 0) ? '▶' : '○');
-      const color = st.done ? '#5a5a4e' : (i === (q.current_stage || 0) ? 'var(--text-primary)' : 'var(--text-secondary)');
-      const strike = st.done ? 'text-decoration:line-through;' : '';
-      return `<div style="font-size:12px;color:${color};${strike}margin:2px 0">${mark} ${esc(st.text || '')}</div>`;
+    const statusColor = isCompleted ? 'var(--text-secondary)' : (isFailed ? '#d45a5a' : t.color);
+    const rawStages = q.stages ?? q.objectives ?? [];
+    const steps = (Array.isArray(rawStages) ? rawStages : [rawStages])
+      .map(st => typeof st === 'string' ? {text: st} : st)
+      .filter(st => st && (st.text || st.name || st.title));
+    const done = st => isCompleted || [true, 'true', 1].includes(st.done ?? st.completed);
+    const current = Number(q.current_stage);
+    const next = steps[current] && !done(steps[current]) ? current : steps.findIndex(st => !done(st));
+    const stages = steps.map((st, i) => {
+      const mark = done(st) ? '✓' : (!isFailed && i === next ? '▶' : '○');
+      return `<div class="ability-desc">${mark} ${esc(st.text || st.name || st.title)}</div>`;
     }).join('');
-    const rewards = q.rewards && Object.keys(q.rewards).length
-      ? `<div style="font-size:11px;color:var(--text-secondary);margin-top:4px">
-           🎁 ${q.rewards.xp ? `+${q.rewards.xp} XP` : ''}
-           ${q.rewards.gold ? ` · +${q.rewards.gold}💰` : ''}
-           ${q.rewards.items && q.rewards.items.length ? ' · ' + q.rewards.items.map(esc).join(', ') : ''}
-         </div>`
-      : '';
-    return `<div class="ability-card" style="border-color:${statusColor};${isCompleted ? 'opacity:0.55;' : ''}">
+    const reward = q.rewards || {};
+    const items = Array.isArray(reward.items) ? reward.items : [reward.items];
+    const parts = typeof reward === 'string' ? [reward] : [
+      reward.xp && '+' + reward.xp + ' XP', reward.gold && '+' + reward.gold + ' золота',
+      ...items.map(itemLabel), reward.reputation
+    ];
+    const labels = parts.filter(v => typeof v === 'string' && v.trim()).map(esc);
+    const rewards = labels.length ? '<div class="ability-desc">🎁 ' + labels.join(' · ') + '</div>' : '';
+    return `<div class="ability-card" style="border-color:${statusColor};">
       <div class="ability-header">
-        <span class="ability-name" style="color:${statusColor}">${statusIcon} ${t.icon} ${esc(q.name || '—')}</span>
+        <span class="ability-name" style="color:${statusColor}">${statusIcon} ${t.icon} ${esc(q.name || q.title || q.id || 'Без названия')}</span>
       </div>
-      <div style="font-size:11px;color:${statusColor};margin-bottom:4px">${t.label}${q.giver ? ' · от ' + esc(q.giver) : ''}${q.location ? ' · ' + esc(q.location) : ''}</div>
+      <div style="font-size:11px;color:${statusColor};margin-bottom:4px">${t.label} · ${isCompleted ? 'Выполнен' : isFailed ? 'Провален' : 'Активен'}${q.giver ? ' · от ' + esc(q.giver) : ''}${q.location ? ' · ' + esc(q.location) : ''}</div>
       <div>${stages || '<div style="font-size:12px;color:var(--text-secondary);font-style:italic">— нет этапов —</div>'}</div>
       ${rewards}
     </div>`;
@@ -1078,8 +1094,24 @@ async function doSheet() {
     ? activeQuests.map(renderQuest).join('')
     : '<div class="tag empty">нет активных квестов</div>';
   const completedBlock = completedQuests.length
-    ? `<details style="margin-top:8px"><summary style="cursor:pointer;color:var(--text-secondary);font-size:12px">Выполненные (${completedQuests.length})</summary><div style="margin-top:6px">${completedQuests.map(renderQuest).join('')}</div></details>`
+    ? `<details style="margin-top:8px"><summary style="cursor:pointer;color:var(--text-secondary);font-size:12px">Завершённые (${completedQuests.length})</summary><div style="margin-top:6px">${completedQuests.map(renderQuest).join('')}</div></details>`
     : '';
+
+  return questsBlock + completedBlock;
+}
+
+function openJournal(title, html) {
+  modalContent.innerHTML = `<h3>${title}</h3>${html}<button class="btn primary">Закрыть</button>`;
+  modalContent.lastElementChild.onclick = () => modalEl.classList.remove('open');
+  modalEl.classList.add('open');
+}
+
+async function doSheet() {
+  if (!state) return;
+  const s = state.stats || {};
+  const cd = (state.conditions || []).length
+    ? state.conditions.map(c => `<span class="tag">${esc(c)}</span>`).join('')
+    : '<span class="tag empty">нет</span>';
 
   const lvlHist = (state.level_history || []).length
     ? state.level_history.map(h =>
@@ -1146,10 +1178,10 @@ async function doSheet() {
     ${situationBox}
     ${dcBox}
     <h3 style="margin-top:12px;font-size:15px">🎯 Квесты</h3>
-    <div>${questsBlock}${completedBlock}</div>
+    <div>${questsHtml()}</div>
     <h3 style="margin-top:12px;font-size:15px">📈 Прокачка</h3>
     <div>${lvlHist}</div>
-    <h3 style="margin-top:12px;font-size:15px">🎒 Инвентарь</h3><div class="tags">${inv}</div>
+    <h3 style="margin-top:12px;font-size:15px">🎒 Инвентарь</h3>${inventoryHtml()}
     <h3 style="margin-top:12px;font-size:15px">Состояния</h3><div class="tags">${cd}</div>
     <button class="btn" style="margin-top:8px" onclick="document.getElementById('modal').classList.remove('open');doNotes();">📝 Заметки (${notesCount}${notesUnread > 0 ? ', ' + notesUnread + ' новых' : ''})</button>
     <button class="btn" style="margin-top:4px" onclick="document.getElementById('modal').classList.remove('open');doSkills();">🎯 Умения и навыки</button>
@@ -1415,6 +1447,8 @@ function doReset() {
 }
 function doHelp() {
   addHtmlMsg('system', 'Команды:<br><code>/roll 1d20+3</code> — бросок<br>' +
+    '<code>/inventory</code> — 🎒 Инвентарь<br>' +
+    '<code>/quests</code> — 🎯 Квесты<br>' +
     '<code>/sheet</code> — полный лист<br><code>/skills</code> — умения и навыки<br>' +
     '<code>/sync</code> — восстановить данные персонажа из истории<br>' +
     '<code>/notes</code> — заметки, письма, документы<br>' +
@@ -1622,18 +1656,6 @@ function init() {
     if (typeof state.cover !== 'string') state.cover = 'нет';
     if (typeof state.weapon_in_hand !== 'string') state.weapon_in_hand = '';
     if (typeof state.restrained !== 'boolean') state.restrained = false;
-    if (Array.isArray(state.quests)) {
-      state.quests = state.quests.map(q => {
-        if (typeof q === 'string') {
-          return { id: 'legacy-' + Math.random().toString(36).slice(2,8), name: q,
-                   type: 'side', status: 'active', chain: '', chain_order: 0,
-                   stages: [], current_stage: 0, rewards: {}, giver: '', location: '' };
-        }
-        return q;
-      });
-    } else {
-      state.quests = [];
-    }
     renderAll(); renderStatus();
     addMsg('system', '↩ История восстановлена. Продолжайте.');
   } else {
