@@ -198,7 +198,7 @@
   .kv .v { color: var(--text-primary); font-weight: 500; font-family: var(--font-serif); }
   .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
   .tag { background: var(--bg-card); padding: 5px 12px; border-radius: 6px; font-size: 13px; color: var(--text-secondary); border: 1px solid var(--border-subtle); }
-  .tag.empty { color: var(--text-secondary); font-style: italic; }
+  .tag.empty { color: #5a5a4e; font-style: italic; }
   .tag.skill { border-color: #4a3a6e; color: #b48cff; }
   .tag.ability { border-color: #5a3a2a; color: #e8c8a8; }
   .tag.warn { border-color: #5a3a2a; color: #d45a5a; background: #2a1f1a; }
@@ -225,7 +225,7 @@
   .ability-uses { font-size: 12px; font-family: monospace; color: var(--text-secondary); }
   .ability-uses.empty { color: #d45a5a; }
   .ability-desc { font-size: 12px; color: var(--text-secondary); line-height: 1.4; }
-  .ability-recharge { font-size: 10px; color: var(--text-secondary); margin-top: 3px; font-style: italic; }
+  .ability-recharge { font-size: 10px; color: #5a5a4e; margin-top: 3px; font-style: italic; }
   .ability-card.passive { border-color: #4a3a6e; }
   .ability-card.passive .ability-name { color: #b48cff; }
   .situation-box {
@@ -287,7 +287,7 @@
   .note-action-btn:active { background: var(--bg-deep); }
 </style>
 </head>
-<body data-remote-avatars="{{ '1' if remote_avatars else '0' }}">
+<body>
 
 <header>
   <h1>🎲 <span>RPG</span> ИИ-Мастер</h1>
@@ -307,8 +307,6 @@
   <button class="quick-btn" data-quick="/roll 1d20">🎲 d20</button>
   <button class="quick-btn" id="quick-custom-roll">🎲 Свой</button>
   <button class="quick-btn" data-quick="/skills">🎯 Умения</button>
-  <button class="quick-btn" data-quick="/inventory">🎒 Инвентарь</button>
-  <button class="quick-btn" data-quick="/quests">🎯 Квесты</button>
   <button class="quick-btn" data-quick="/notes">📝 Заметки</button>
 </div>
 
@@ -343,7 +341,6 @@
   <div class="drawer-section">
     <button class="btn" data-action="save">💾 Сохранить</button>
     <button class="btn" data-action="load">📂 Загрузить</button>
-    <button class="btn" data-action="manage-saves">🗂 Управление сохранениями</button>
     <button class="btn" data-action="reset">✨ Новая игра</button>
     <button class="btn" data-action="help">❓ Справка</button>
   </div>
@@ -377,7 +374,7 @@ const EMPTY_STATE = {
   dc_modifier:0, dc_modifier_reasons:[],
   position:"стоит", cover:"нет",
   weapon_in_hand:"", restrained:false,
-  level_history:[], xp_event_ids:[], level_pending:0, state_extract_counter:0
+  level_history:[], xp_event_ids:[], level_pending:0
 };
 
 const NOTE_TYPES = {
@@ -453,151 +450,67 @@ function detectArchetype(st) {
   }
   return best[1];
 }
-const raceProfiles = [
-  [/полу[ -]?эльф|half[ -]?elf/, 'half-elf, slightly pointed ears, mixed human and elven features', 'halfelf'],
-  [/полу[ -]?орк|half[ -]?orc/, 'half-orc, strong jaw, small lower tusks', 'halforc'],
-  [/дроу|т[её]мн.*эльф|drow|dark elf/, 'dark elf, long pointed ears, silver hair, charcoal skin', 'drow'],
-  [/эльф|elf|elven/, 'elf, long tapered ears, high cheekbones', 'elf'],
-  [/дворф|дварф|дворфий|dwarf|dwarven/, 'dwarf, broad face, stocky shoulders, strong brow', 'dwarf'],
-  [/гном|gnome/, 'gnome, prominent nose, expressive eyes, small pointed ears', 'gnome'],
-  [/полуросл|хоббит|halfling|hobbit/, 'halfling, round cheeks, curly hair, small rounded ears', 'halfling'],
-  [/тифлинг|tiefling/, 'tiefling, curved horns on forehead, pointed ears', 'tiefling'],
-  [/драконорожд|драконорож|dragonborn/, 'dragonborn, fully draconic scaled face, broad snout, head crest', 'dragonborn'],
-  [/кобольд|kobold/, 'kobold, narrow reptilian muzzle, short horns, large alert eyes', 'kobold'],
-  [/гоблин|goblin/, 'goblin, large swept ears, pointed nose, green skin', 'goblin'],
-  [/орк|orc/, 'orc, large lower tusks, broad jaw, heavy brow', 'orc'],
-  [/человек|человеч|human/, 'human, rounded ears, human facial proportions', 'human']
-];
-function avatarProfile(st) {
-  const race = String(st.race || '').trim().toLowerCase();
-  return raceProfiles.find(([match]) => match.test(race));
-}
 function buildAvatarPrompt(st) {
-  const profile = avatarProfile(st);
-  return ['Fantasy RPG bust portrait of one character, visible face and ears', st.race,
-    profile?.[1], detectArchetype(st), st.name,
-    'Painterly dark fantasy, dramatic light, centered, no writing'].filter(Boolean).join(', ').slice(0,1200);
+  const archetype = detectArchetype(st);
+  const conditions = (st.conditions || []).join(', ');
+  const race = st.race ? st.race + ' ' : '';
+  const name = st.name || 'Adventurer';
+  return `Fantasy RPG character portrait of ${name}, ${race}${archetype}, level ${st.level}, detailed digital painting, dramatic lighting, dark atmospheric background, painterly style, high quality, centered composition${conditions ? ', ' + conditions : ''}`;
 }
-function avatarKey(st) {
-  return JSON.stringify([st.name, st.race, st.class].map(v => String(v || '').trim().toLowerCase()));
-}
-function localPortrait(st, seed) {
-  const kind = avatarProfile(st)?.[2];
-  const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = 96;
-  const g = canvas.getContext('2d');
-  function oval(color, x, y, w, h) {
-    g.fillStyle = color; g.beginPath(); g.ellipse(x,y,w,h,0,0,2*Math.PI); g.fill();
-  }
-  function poly(color, ...points) {
-    g.fillStyle = color; g.beginPath(); g.moveTo(...points[0]);
-    for (const point of points.slice(1)) g.lineTo(...point);
-    g.closePath(); g.fill();
-  }
-  const robe = ['#394e61','#704744','#525940','#60465f'][seed % 4];
-  const skin = ({goblin:'#7d9a58',orc:'#76916a',halforc:'#93a477',tiefling:'#b37279',
-    drow:'#786889',dragonborn:'#ad804d',kobold:'#a46543'})[kind] ||
-    ['#d6a880','#a67552','#bf8763','#8e624c'][Math.floor(seed/4)%4];
-  const hair = kind === 'drow' ? '#dfd9df' : ['#4a312c','#29272c','#77503a','#8d7461'][Math.floor(seed/16)%4];
-  const reptile = kind === 'dragonborn' || kind === 'kobold';
-  const wide = ['dwarf','orc','halforc','dragonborn'].includes(kind);
-  g.fillStyle = '#262632'; g.fillRect(0,0,96,96);
-  oval('#37343c',48,43,36,39);
-  oval(robe,48,101,wide?49:42,35);
-  poly('#c69b62',[26,72],[45,85],[48,94],[32,84]);
-  if (!kind) {
-    // Custom ancestry has no assumed anatomy. Use a heraldic badge offline.
-    poly('#c69b62',[48,14],[70,24],[66,54],[48,69],[30,54],[26,24]);
-    oval(robe,48,39,17,18); g.fillStyle='#fff0cf'; g.textAlign='center';
-    g.font='bold 20px serif'; g.fillText(Array.from(st.race?.trim() || st.name.trim())[0].toUpperCase(),48,46);
-    return canvas.toDataURL();
-  }
-  const w = wide?23:kind==='kobold'?16:19;
-  const ear = ({elf:10,drow:10,halfelf:20,goblin:3,tiefling:14,gnome:19})[kind];
-  for (const sign of [-1,1]) {
-    const x = v => 48+sign*v;
-    if (ear) poly(skin,[x(w-4),41],[x(48-ear),kind==='goblin'?24:28],[x(w-2),56]);
-    else oval(skin,x(w-1),49,5,7);
-  }
-  oval(skin,48,48,w,kind==='halfling'?21:25);
-  if (reptile) {
-    for (const x of [33,43,53,63]) poly('#d6b77e',[x,31],[x-3,13],[x+7,27]);
-    oval(skin,48,62,kind==='kobold'?10:18,11);
-    for (const x of [42,54]) oval('#4e382e',x,62,2,1.6);
-  } else {
-    poly(hair,[48-w,43],[48-w,29],[41,20],[56,20],[48+w,30],[48+w,39],[53,31],[40,35]);
-    if (kind==='halfling') for (const x of [31,38,45,52,59,66]) oval(hair,x,30+Math.abs(x-48)/5,6,6);
-    oval('#a16f56',48,53,kind==='gnome'?8:4,kind==='goblin'?8:4);
-  }
-  for (const sign of [-1,1]) {
-    const x = 48+sign*9;
-    oval('#372f2b',x,45,4.3,2.4); oval('#ecd6a4',x-sign,45,1.3,1.3);
-    if (kind==='tiefling') poly('#d9ba89',[x,27],[x+sign*8,22],[x+sign*12,7],[x+sign*13,23],[x+sign*6,32]);
-    if (kind==='orc'||kind==='halforc') poly('#eadcb9',[x-3,63],[x,kind==='orc'?51:56],[x+3,62]);
-  }
-  if (kind==='dwarf') poly(hair,[26,51],[36,58],[48,57],[60,58],[70,51],[65,72],[49,82],[32,73]);
-  poly('#66483f',[43,64],[53,64],[48,66]);
-  return canvas.toDataURL();
-}
-let currentAvatar = null;
-let avatarRequest = 0;
-function cachedAvatarFor(st) {
-  const key = avatarKey(st);
-  if (currentAvatar?.key === key) return currentAvatar;
+function cachedAvatarFor(name) {
   try {
-    const data = JSON.parse(localStorage.getItem(AVATAR_KEY));
-    if (data?.key === key && /^data:image\/(png|jpeg|webp);base64,/.test(data.url)) return data;
+    const raw = localStorage.getItem(AVATAR_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    if (data.name === name && data.url) return data;
   } catch(e){}
   return null;
 }
-function showAvatar(wrap, data, name) {
-  const img = new Image(); img.src = data.url; img.alt = name;
-  wrap.replaceChildren(img); wrap.classList.toggle('loading', Boolean(data.pending));
+function saveAvatar(name, url) {
+  try { localStorage.setItem(AVATAR_KEY, JSON.stringify({name, url})); } catch(e){}
 }
-async function generateAvatar(force = false) {
+function generateAvatar(force) {
+  if (!state || !state.name || state.name === 'Пустой') return;
   const wrap = document.querySelector('.avatar-wrap');
   if (!wrap) return;
-  const st = state;
-  if (!st?.name || st.name === 'Пустой') {
-    avatarRequest++; currentAvatar = null; return;
+  if (!force) {
+    const cached = cachedAvatarFor(state.name);
+    if (cached) { wrap.innerHTML = `<img src="${cached.url}" alt="${esc(state.name)}">`; return; }
   }
-  const saved = !force && cachedAvatarFor(st);
-  if (saved) {
-    currentAvatar = saved; showAvatar(wrap,saved,st.name); return;
-  }
-  const id = ++avatarRequest;
-  const key = avatarKey(st);
-  const seed = Math.floor(Math.random()*1000000);
-  const remote = document.body.dataset.remoteAvatars === '1';
-  const data = {key, url:localPortrait(st,seed), pending:remote};
-  currentAvatar = data;
-  showAvatar(wrap,data,st.name);
-  if (remote) {
-    try {
-      const response = await fetch('/api/avatar',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({prompt:buildAvatarPrompt(st),seed})});
-      if (response.ok) {
-        const blob = await response.blob();
-        const bitmap = await createImageBitmap(blob);
-        const canvas = document.createElement('canvas'); canvas.width = canvas.height = 256;
-        canvas.getContext('2d').drawImage(bitmap,0,0,256,256); bitmap.close();
-        data.url = canvas.toDataURL('image/jpeg',0.9);
-      }
-    } catch(e) { /* The local portrait is already visible. */ }
-  }
-  if (avatarRequest !== id || currentAvatar !== data || !state || avatarKey(state)!==key) return;
-  data.pending = false;
-  const activeWrap = document.querySelector('.avatar-wrap');
-  if (activeWrap) showAvatar(activeWrap,data,st.name);
-  for (const img of document.querySelectorAll('img.avatar-large')) img.src = data.url;
-  try { localStorage.setItem(AVATAR_KEY,JSON.stringify(data)); } catch(e){}
+  wrap.innerHTML = '<div class="avatar-placeholder">?</div>';
+  wrap.classList.add('loading');
+  const prompt = buildAvatarPrompt(state);
+  const seed = Math.floor(Math.random() * 999999);
+  const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=256&height=256&seed=${seed}&nologo=true&model=flux&enhance=true`;
+  const img = new Image();
+  img.crossOrigin = 'anonymous';
+  img.onload = () => {
+    wrap.classList.remove('loading');
+    wrap.innerHTML = `<img src="${url}" alt="${esc(state.name)}">`;
+    saveAvatar(state.name, url);
+  };
+  img.onerror = () => {
+    const fallback = `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(state.name)}&backgroundColor=24201d&radius=50`;
+    wrap.classList.remove('loading');
+    wrap.innerHTML = `<img src="${fallback}" alt="${esc(state.name)}">`;
+    saveAvatar(state.name, fallback);
+  };
+  img.src = url;
+}
+function maybeGenerateAvatar() {
+  if (!state || !state.name || state.name === 'Пустой') return;
+  const cached = cachedAvatarFor(state.name);
+  const wrap = document.querySelector('.avatar-wrap');
+  if (!wrap) return;
+  if (cached) { wrap.innerHTML = `<img src="${cached.url}" alt="${esc(state.name)}">`; }
+  else { generateAvatar(false); }
 }
 function openAvatarModal() {
-  if (!state?.name || state.name === 'Пустой') {
-    addMsg('system', 'Для портрета укажите имя персонажа.');
+  if (!state || !state.name || state.name === 'Пустой') {
+    addMsg('system', 'Имя персонажа ещё не определено. Сыграйте пару ходов.');
     return;
   }
-  const cached = cachedAvatarFor(state);
+  const cached = cachedAvatarFor(state.name);
   const imgSrc = cached ? cached.url : '';
   modalContent.innerHTML = `
     <h3>🖼 Портрет: ${esc(state.name)}</h3>
@@ -607,6 +520,7 @@ function openAvatarModal() {
   `;
   modalEl.classList.add('open');
   document.getElementById('regen-avatar').onclick = () => {
+    localStorage.removeItem(AVATAR_KEY);
     modalEl.classList.remove('open');
     generateAvatar(true);
   };
@@ -827,7 +741,7 @@ function renderStatus() {
     ${c ? `<div class="status-row" style="font-size:12px;color:var(--text-secondary)">${c}</div>` : ''}`;
   const wrap = statusEl.querySelector('.avatar-wrap');
   if (wrap) wrap.onclick = openAvatarModal;
-  generateAvatar();
+  maybeGenerateAvatar();
   updateNotesBadge();
 }
 
@@ -918,49 +832,23 @@ async function callAI(msgs) {
   document.querySelectorAll('.quick-btn').forEach(b => b.disabled = false);
   inputEl.focus();
 }
-async function updateState(repair = false) {
-  const session = messages;
+async function updateState() {
   if (!state) state = {...EMPTY_STATE};
   try {
     const res = await fetch('/api/state', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({messages, state, repair})
+      body: JSON.stringify({messages, state})
     });
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    const oldLevel = Number(state.level || 1);
-    const updated = await res.json();
-    if (messages !== session) return;
-    state = updated;
-    if (Number(state.level || 1) > oldLevel) {
-      const gained = Number(state.level) - oldLevel;
-      addMsg('system', `🎉 Доступно повышение уровня: ${state.level} (получено уровней: ${gained}). Обсуди с мастером выбор повышения характеристик и умения.`);
+    if (res.ok) {
+      const oldLevel = Number(state.level || 1);
+      state = await res.json();
+      if (Number(state.level || 1) > oldLevel) {
+        const gained = Number(state.level) - oldLevel;
+        addMsg('system', `🎉 Доступно повышение уровня: ${state.level} (получено уровней: ${gained}). Обсуди с мастером выбор повышения характеристик и умения.`);
+      }
+      renderStatus(); persist();
     }
-    renderStatus(); persist();
-    if (res.headers.get('X-Sheet-Sync') === 'failed') throw new Error('модель не вернула данные листа');
-    if (repair) {
-      addMsg('system', 'Сверка с историей завершена. Откройте /skills для просмотра умений.');
-      return;
-    }
-    // Persist a rolling summary in the browser save so old turns are not resent forever.
-    // This endpoint calls the summarizer only after the threshold is crossed.
-    if (messages.filter(m => m.role === 'user' || m.role === 'assistant').length > 30) {
-      try {
-        const compactRes = await fetch('/api/compact', {
-          method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({messages})
-        });
-        if (compactRes.ok) {
-          const compactData = await compactRes.json();
-          if (compactData.compacted && Array.isArray(compactData.messages)) {
-            messages = compactData.messages;
-            persist();
-          }
-        }
-      } catch(compactError) { console.warn('History compaction skipped:', compactError); }
-    }
-  } catch(e) {
-    if (messages === session) addMsg('system', 'Не удалось обновить лист (' + e.message + '). Для повторной сверки введите /sync.');
-  }
+  } catch(e){}
 }
 
 /* SEND */
@@ -983,14 +871,8 @@ async function sendMessage(text) {
 function handleCommand(cmd, arg) {
   switch(cmd) {
     case '/roll': return doRoll(arg || '1d20');
-    case '/sync':
-      if (!messages.length) return addMsg('system', 'Сначала опишите персонажа.');
-      busy = true;
-      return updateState(true).finally(() => { busy = false; });
     case '/sheet': return doSheet();
     case '/skills': return doSkills();
-    case '/inventory': return openJournal('🎒 Инвентарь', inventoryHtml());
-    case '/quests': return openJournal('🎯 Квесты', questsHtml());
     case '/notes': return doNotes();
     case '/save': return doSave(arg);
     case '/load': return doLoad(arg);
@@ -1021,31 +903,25 @@ async function doRoll(expr) {
 }
 
 /* SHEET */
-function itemLabel(item) {
-  if (typeof item === 'string') return item.trim();
-  if (!item || typeof item !== 'object') return '';
-  const name = item.name || item.title || item.item;
-  if (typeof name !== 'string') return '';
-  const qty = Number(item.quantity ?? item.qty ?? item.count ?? 1);
-  return Number.isFinite(qty) && qty > 1 ? name + ' × ' + qty : name;
-}
+async function doSheet() {
+  if (!state) return;
+  const s = state.stats || {};
+  const quests = (state.quests || []).map(q => {
+    if (typeof q === 'string') {
+      return { id: 'old-' + q, name: q, type: 'side', status: 'active',
+               chain: '', chain_order: 0, stages: [], current_stage: 0,
+               rewards: {}, giver: '', location: '' };
+    }
+    return q;
+  });
 
-function inventoryHtml() {
-  const items = Array.isArray(state.inventory) ? state.inventory.map(itemLabel).filter(Boolean) : [];
-  const tags = items.map(i => `<span class="tag">${esc(i)}</span>`).join('');
-  return '<div class="tags">' + (tags || '<span class="tag empty">пусто</span>') + '</div>';
-}
+  const inv = (state.inventory || []).length
+    ? state.inventory.map(i => `<span class="tag">${esc(i)}</span>`).join('')
+    : '<span class="tag empty">пусто</span>';
+  const cd = (state.conditions || []).length
+    ? state.conditions.map(c => `<span class="tag">${esc(c)}</span>`).join('')
+    : '<span class="tag empty">нет</span>';
 
-function questsHtml() {
-  const quests = (Array.isArray(state.quests) ? state.quests : [])
-    .map(q => typeof q === 'string' ? {name: q} : q)
-    .filter(q => q && typeof q === 'object')
-    .map(q => {
-      const status = String(q.status || '').trim().toLowerCase();
-      const completed = ['completed', 'done', 'выполнен', 'завершен', 'завершён'].includes(status);
-      const failed = ['failed', 'провален'].includes(status);
-      return {...q, status: completed ? 'completed' : failed ? 'failed' : 'active'};
-    });
   const typeInfo = {
     main: { icon: '⭐', label: 'Главный', color: '#c9a227' },
     side: { icon: '📜', label: 'Побочный', color: '#5a8ed4' },
@@ -1058,31 +934,25 @@ function questsHtml() {
     const isCompleted = q.status === 'completed';
     const isFailed = q.status === 'failed';
     const statusIcon = isCompleted ? '✓' : (isFailed ? '✗' : '●');
-    const statusColor = isCompleted ? 'var(--text-secondary)' : (isFailed ? '#d45a5a' : t.color);
-    const rawStages = q.stages ?? q.objectives ?? [];
-    const steps = (Array.isArray(rawStages) ? rawStages : [rawStages])
-      .map(st => typeof st === 'string' ? {text: st} : st)
-      .filter(st => st && (st.text || st.name || st.title));
-    const done = st => isCompleted || [true, 'true', 1].includes(st.done ?? st.completed);
-    const current = Number(q.current_stage);
-    const next = steps[current] && !done(steps[current]) ? current : steps.findIndex(st => !done(st));
-    const stages = steps.map((st, i) => {
-      const mark = done(st) ? '✓' : (!isFailed && i === next ? '▶' : '○');
-      return `<div class="ability-desc">${mark} ${esc(st.text || st.name || st.title)}</div>`;
+    const statusColor = isCompleted ? '#5a5a4e' : (isFailed ? '#d45a5a' : t.color);
+    const stages = (q.stages || []).map((st, i) => {
+      const mark = st.done ? '✓' : (i === (q.current_stage || 0) ? '▶' : '○');
+      const color = st.done ? '#5a5a4e' : (i === (q.current_stage || 0) ? 'var(--text-primary)' : 'var(--text-secondary)');
+      const strike = st.done ? 'text-decoration:line-through;' : '';
+      return `<div style="font-size:12px;color:${color};${strike}margin:2px 0">${mark} ${esc(st.text || '')}</div>`;
     }).join('');
-    const reward = q.rewards || {};
-    const items = Array.isArray(reward.items) ? reward.items : [reward.items];
-    const parts = typeof reward === 'string' ? [reward] : [
-      reward.xp && '+' + reward.xp + ' XP', reward.gold && '+' + reward.gold + ' золота',
-      ...items.map(itemLabel), reward.reputation
-    ];
-    const labels = parts.filter(v => typeof v === 'string' && v.trim()).map(esc);
-    const rewards = labels.length ? '<div class="ability-desc">🎁 ' + labels.join(' · ') + '</div>' : '';
-    return `<div class="ability-card" style="border-color:${statusColor};">
+    const rewards = q.rewards && Object.keys(q.rewards).length
+      ? `<div style="font-size:11px;color:var(--text-secondary);margin-top:4px">
+           🎁 ${q.rewards.xp ? `+${q.rewards.xp} XP` : ''}
+           ${q.rewards.gold ? ` · +${q.rewards.gold}💰` : ''}
+           ${q.rewards.items && q.rewards.items.length ? ' · ' + q.rewards.items.map(esc).join(', ') : ''}
+         </div>`
+      : '';
+    return `<div class="ability-card" style="border-color:${statusColor};${isCompleted ? 'opacity:0.55;' : ''}">
       <div class="ability-header">
-        <span class="ability-name" style="color:${statusColor}">${statusIcon} ${t.icon} ${esc(q.name || q.title || q.id || 'Без названия')}</span>
+        <span class="ability-name" style="color:${statusColor}">${statusIcon} ${t.icon} ${esc(q.name || '—')}</span>
       </div>
-      <div style="font-size:11px;color:${statusColor};margin-bottom:4px">${t.label} · ${isCompleted ? 'Выполнен' : isFailed ? 'Провален' : 'Активен'}${q.giver ? ' · от ' + esc(q.giver) : ''}${q.location ? ' · ' + esc(q.location) : ''}</div>
+      <div style="font-size:11px;color:${statusColor};margin-bottom:4px">${t.label}${q.giver ? ' · от ' + esc(q.giver) : ''}${q.location ? ' · ' + esc(q.location) : ''}</div>
       <div>${stages || '<div style="font-size:12px;color:var(--text-secondary);font-style:italic">— нет этапов —</div>'}</div>
       ${rewards}
     </div>`;
@@ -1094,24 +964,8 @@ function questsHtml() {
     ? activeQuests.map(renderQuest).join('')
     : '<div class="tag empty">нет активных квестов</div>';
   const completedBlock = completedQuests.length
-    ? `<details style="margin-top:8px"><summary style="cursor:pointer;color:var(--text-secondary);font-size:12px">Завершённые (${completedQuests.length})</summary><div style="margin-top:6px">${completedQuests.map(renderQuest).join('')}</div></details>`
+    ? `<details style="margin-top:8px"><summary style="cursor:pointer;color:var(--text-secondary);font-size:12px">Выполненные (${completedQuests.length})</summary><div style="margin-top:6px">${completedQuests.map(renderQuest).join('')}</div></details>`
     : '';
-
-  return questsBlock + completedBlock;
-}
-
-function openJournal(title, html) {
-  modalContent.innerHTML = `<h3>${title}</h3>${html}<button class="btn primary">Закрыть</button>`;
-  modalContent.lastElementChild.onclick = () => modalEl.classList.remove('open');
-  modalEl.classList.add('open');
-}
-
-async function doSheet() {
-  if (!state) return;
-  const s = state.stats || {};
-  const cd = (state.conditions || []).length
-    ? state.conditions.map(c => `<span class="tag">${esc(c)}</span>`).join('')
-    : '<span class="tag empty">нет</span>';
 
   const lvlHist = (state.level_history || []).length
     ? state.level_history.map(h =>
@@ -1154,7 +1008,7 @@ async function doSheet() {
     const m = Math.floor((val - 10) / 2);
     return m >= 0 ? '+' + m : '' + m;
   };
-  const cached = cachedAvatarFor(state);
+  const cached = cachedAvatarFor(state.name);
   const avatar = cached
     ? `<img class="avatar-large" src="${cached.url}" alt="${esc(state.name)}" style="width:140px;height:140px">`
     : '';
@@ -1178,10 +1032,10 @@ async function doSheet() {
     ${situationBox}
     ${dcBox}
     <h3 style="margin-top:12px;font-size:15px">🎯 Квесты</h3>
-    <div>${questsHtml()}</div>
+    <div>${questsBlock}${completedBlock}</div>
     <h3 style="margin-top:12px;font-size:15px">📈 Прокачка</h3>
     <div>${lvlHist}</div>
-    <h3 style="margin-top:12px;font-size:15px">🎒 Инвентарь</h3>${inventoryHtml()}
+    <h3 style="margin-top:12px;font-size:15px">🎒 Инвентарь</h3><div class="tags">${inv}</div>
     <h3 style="margin-top:12px;font-size:15px">Состояния</h3><div class="tags">${cd}</div>
     <button class="btn" style="margin-top:8px" onclick="document.getElementById('modal').classList.remove('open');doNotes();">📝 Заметки (${notesCount}${notesUnread > 0 ? ', ' + notesUnread + ' новых' : ''})</button>
     <button class="btn" style="margin-top:4px" onclick="document.getElementById('modal').classList.remove('open');doSkills();">🎯 Умения и навыки</button>
@@ -1311,15 +1165,13 @@ async function doSkills() {
     ? state.proficiencies.map(p => `<span class="tag">${esc(p)}</span>`).join('')
     : '<span class="tag empty">нет владений</span>';
   const skills = (state.skills || []).length
-    ? state.skills.filter(Boolean).map(sk => {
-        if (typeof sk === "string") sk = {name: sk};
-        const bonus = sk.bonus == null ? '' : sk.bonus >= 0 ? '+' + sk.bonus : '' + sk.bonus;
+    ? state.skills.map(sk => {
+        const bonus = sk.bonus >= 0 ? '+' + sk.bonus : '' + sk.bonus;
         return `<span class="tag skill" title="${esc(sk.source || '')}">${esc(sk.name)} ${bonus}</span>`;
       }).join('')
     : '<span class="tag empty">нет навыков</span>';
   const abilities = (state.abilities || []).length
-    ? state.abilities.filter(Boolean).map(a => {
-        if (typeof a === "string") a = {name: a};
+    ? state.abilities.map(a => {
         const isPassive = a.recharge === 'passive' || !a.uses_max;
         const usesText = isPassive ? '∞' : `${a.uses_left ?? a.uses_max}/${a.uses_max}`;
         const isEmpty = !isPassive && (a.uses_left || 0) === 0;
@@ -1393,51 +1245,6 @@ async function doLoad(name) {
     addMsg('system', `📂 Загружено: «${name}»`);
   } catch(e) { addMsg('system', 'Ошибка: ' + e.message); }
 }
-async function manageSaves() {
-  let saves;
-  try {
-    const res = await fetch('/api/saves');
-    if (!res.ok) throw new Error('Не удалось получить список сохранений');
-    saves = await res.json();
-  } catch (e) { addMsg('system', 'Ошибка списка сохранений: ' + e.message); return; }
-  if (!saves.length) { addMsg('system', 'Нет сохранений для управления.'); return; }
-  modalContent.innerHTML = `<h3>Управление сохранениями</h3>
-    <div style="display:flex;flex-direction:column;gap:10px">
-      ${saves.map(name => `<div style="display:flex;align-items:center;gap:8px;padding:10px;background:var(--bg-card);border:1px solid var(--border-subtle);border-radius:8px">
-        <div style="flex:1;min-width:0;overflow-wrap:anywhere">${esc(name)}</div>
-        <button class="btn" data-rename="${esc(name)}" style="padding:7px 10px">✏️</button>
-        <button class="btn" data-delete="${esc(name)}" style="padding:7px 10px;color:#e57373">🗑️</button>
-      </div>`).join('')}
-    </div>
-    <button class="btn" id="manage-close">Закрыть</button>`;
-  modalEl.classList.add('open');
-  document.getElementById('manage-close').onclick = () => modalEl.classList.remove('open');
-  modalContent.querySelectorAll('[data-rename]').forEach(btn => btn.onclick = async () => {
-    const oldName = btn.dataset.rename;
-    const newName = await promptModal('Переименовать сохранение', oldName);
-    if (!newName) { manageSaves(); return; }
-    if (newName === oldName) { manageSaves(); return; }
-    try {
-      const res = await fetch('/api/save/rename', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({old_name:oldName,new_name:newName})});
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Не удалось переименовать');
-      addMsg('system', `✏️ Сохранение переименовано: «${oldName}» → «${data.name}»`);
-      manageSaves();
-    } catch(e) { addMsg('system', 'Ошибка переименования: ' + e.message); }
-  });
-  modalContent.querySelectorAll('[data-delete]').forEach(btn => btn.onclick = async () => {
-    const name = btn.dataset.delete;
-    if (!confirm(`Удалить сохранение «${name}» и его резервную копию? Это действие нельзя отменить.`)) return;
-    try {
-      const res = await fetch('/api/save/delete', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})});
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Не удалось удалить');
-      addMsg('system', `🗑️ Удалено сохранение: «${name}»`);
-      manageSaves();
-    } catch(e) { addMsg('system', 'Ошибка удаления: ' + e.message); }
-  });
-}
-
 function doReset() {
   if (!confirm('Начать новую игру? Текущая история будет потеряна.')) return;
   messages = []; state = {...EMPTY_STATE};
@@ -1447,10 +1254,7 @@ function doReset() {
 }
 function doHelp() {
   addHtmlMsg('system', 'Команды:<br><code>/roll 1d20+3</code> — бросок<br>' +
-    '<code>/inventory</code> — 🎒 Инвентарь<br>' +
-    '<code>/quests</code> — 🎯 Квесты<br>' +
     '<code>/sheet</code> — полный лист<br><code>/skills</code> — умения и навыки<br>' +
-    '<code>/sync</code> — восстановить данные персонажа из истории<br>' +
     '<code>/notes</code> — заметки, письма, документы<br>' +
     '<code>/save имя</code> — сохранить<br><code>/load имя</code> — загрузить<br>' +
     '<code>/reset</code> — новая игра<br><br>' +
@@ -1625,7 +1429,6 @@ document.querySelectorAll('#drawer .btn[data-action]').forEach(btn => {
     else if (a === 'notes') doNotes();
     else if (a === 'save') doSave();
     else if (a === 'load') doLoad();
-    else if (a === 'manage-saves') manageSaves();
     else if (a === 'reset') doReset();
     else if (a === 'help') doHelp();
   };
@@ -1646,7 +1449,6 @@ function init() {
     if (!Array.isArray(state.level_history)) state.level_history = [];
     if (!Array.isArray(state.xp_event_ids)) state.xp_event_ids = [];
     if (typeof state.level_pending !== 'number') state.level_pending = 0;
-    if (typeof state.state_extract_counter !== 'number') state.state_extract_counter = 0;
     if (!Array.isArray(state.notes)) state.notes = [];
     if (typeof state.dc_modifier !== 'number') state.dc_modifier = 0;
     if (typeof state.race !== 'string') state.race = '';
@@ -1656,6 +1458,18 @@ function init() {
     if (typeof state.cover !== 'string') state.cover = 'нет';
     if (typeof state.weapon_in_hand !== 'string') state.weapon_in_hand = '';
     if (typeof state.restrained !== 'boolean') state.restrained = false;
+    if (Array.isArray(state.quests)) {
+      state.quests = state.quests.map(q => {
+        if (typeof q === 'string') {
+          return { id: 'legacy-' + Math.random().toString(36).slice(2,8), name: q,
+                   type: 'side', status: 'active', chain: '', chain_order: 0,
+                   stages: [], current_stage: 0, rewards: {}, giver: '', location: '' };
+        }
+        return q;
+      });
+    } else {
+      state.quests = [];
+    }
     renderAll(); renderStatus();
     addMsg('system', '↩ История восстановлена. Продолжайте.');
   } else {

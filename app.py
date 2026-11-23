@@ -3,8 +3,6 @@ import re
 import json
 import random
 import hashlib
-from urllib.parse import quote
-from urllib.request import Request, urlopen
 import tempfile
 from pathlib import Path
 
@@ -13,44 +11,18 @@ from openai import OpenAI
 
 app = Flask(__name__)
 
-# Provider configuration. Yandex AI Studio takes priority when its variables are set.
-YANDEX_API_KEY = os.getenv("YANDEX_API_KEY")
-YANDEX_FOLDER_ID = os.getenv("YANDEX_FOLDER_ID")
+MODEL = os.getenv("OPENAI_MODEL", "qwen2.5:7b")
+BASE_URL = os.getenv("OPENAI_BASE_URL") or None
+API_KEY = os.getenv("OPENAI_API_KEY")
+if not API_KEY and BASE_URL:
+    API_KEY = "ollama"
+if not API_KEY:
+    raise SystemExit("Не задан OPENAI_API_KEY.")
 
-if YANDEX_API_KEY:
-    if not YANDEX_FOLDER_ID:
-        raise SystemExit("Для Yandex AI Studio нужно задать YANDEX_FOLDER_ID.")
-    MODEL = os.getenv(
-        "YANDEX_MODEL",
-        f"gpt://{YANDEX_FOLDER_ID}/deepseek-v4.1-flash",
-    )
-    BASE_URL = "https://ai.api.cloud.yandex.net/v1"
-    client = OpenAI(
-        api_key=YANDEX_API_KEY,
-        base_url=BASE_URL,
-        project=YANDEX_FOLDER_ID,
-    )
-    PROVIDER = "Yandex AI Studio"
+if BASE_URL:
+    client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
 else:
-    # Backward compatibility: OpenAI-compatible providers and local Ollama.
-    MODEL = os.getenv("OPENAI_MODEL", "qwen2.5:7b")
-    BASE_URL = os.getenv("OPENAI_BASE_URL") or None
-    API_KEY = os.getenv("OPENAI_API_KEY")
-    if not API_KEY and BASE_URL:
-        API_KEY = "ollama"
-    if not API_KEY:
-        raise SystemExit(
-            "Не заданы YANDEX_API_KEY/YANDEX_FOLDER_ID или OPENAI_API_KEY."
-        )
-    if BASE_URL:
-        client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
-    else:
-        client = OpenAI(api_key=API_KEY)
-    PROVIDER = "OpenAI-compatible/local"
-
-# Optional cheaper models for background maintenance tasks. If unset, the main model is used.
-STATE_MODEL = os.getenv("YANDEX_STATE_MODEL") or os.getenv("STATE_MODEL") or MODEL
-SUMMARY_MODEL = os.getenv("YANDEX_SUMMARY_MODEL") or os.getenv("SUMMARY_MODEL") or MODEL
+    client = OpenAI(api_key=API_KEY)
 
 BASE_DIR = Path(__file__).resolve().parent
 SAVES_DIR = BASE_DIR / "saves"
@@ -356,22 +328,20 @@ XP начисляется сервером только из новых репл
 ОСНОВНЫЕ ПОЛЯ:
 - Не выдумывай событий.
 - HP не превышает max_hp.
-- Если инвентарь изменился, верни inventory как ПОЛНЫЙ список оставшихся предметов. Сохрани прежние предметы, кроме явно потраченных, отданных или потерянных. После расхода последнего предмета верни []. Если изменений нет, пропусти поле inventory.
-- Предмет: {"name": "Зелье", "quantity": 2}. Объединяй одинаковые предметы, указывай оставшееся количество.
+- Инвентарь — без дублей.
 
-NAME: укажи подтверждённое имя героя из описания игрока или листа мастера. Предложенные варианты и имена NPC пропускай.
 RACE, CLASS, BACKGROUND: сохрани, если уже есть. Меняй только при событии в игре.
 
 STATS: если раса/класс только появились и все 10 — выставь по классу + расовые бонусы. Если уже не 10 — не пересчитывай.
 
 PROFICIENCIES: массив строк. Формируется ОДИН РАЗ. Максимум 12.
 
-SKILLS: массив {"name":"Скрытность","bonus":5,"source":"Плут"}. При создании героя заполни 6–8 навыков с учётом выбора игрока. Обновляй бонусы и добавляй изученные навыки.
+SKILLS: массив {"name":"Скрытность","bonus":5,"source":"Плут"}. ОДИН РАЗ, 6–8 навыков.
 
 ABILITIES: массив {"name":"Ярость","description":"...","uses_max":2,"uses_left":2,"recharge":"long_rest"}.
 recharge: passive (uses_max=0), short_rest, long_rest, day.
 uses_left уменьшай при использовании, восстанавливай при отдыхе.
-При создании героя заполни 5–6 умений по классу. Затем включай все полученные умения и обновляй оставшиеся применения.
+Назначай ОДИН РАЗ, 5–6 умений.
 
 DC_MODIFIER: только реальные причины. Нейтрально → 0, [].
 
@@ -407,7 +377,7 @@ SUMMARY_PROMPT = """
 - Решения и последствия
 - Открытые вопросы, цели, долги
 - Факты мира
-- Имя героя, расу, класс, предысторию, характеристики, навыки, умения и владения
+- Расу, класс, предысторию, характеристики
 - Текущий XP, уровень, активные квесты и их этапы
 - Активные заметки (письма, документы — их суть)
 - Текущее положение
@@ -430,21 +400,16 @@ DEFAULT_STATE = {
     "dc_modifier": 0, "dc_modifier_reasons": [],
     "position": "стоит", "cover": "нет",
     "weapon_in_hand": "", "restrained": False,
-    "level_history": [], "xp_event_ids": [], "level_pending": 0,
-    "state_extract_counter": 0
+    "level_history": [], "xp_event_ids": [], "level_pending": 0
 }
 
 
-# Economy defaults: compact less often and retain a smaller recent window.
-# Both values remain configurable through Railway environment variables.
-MAX_MESSAGES_BEFORE_SUMMARY = int(os.getenv("RPG_SUMMARY_THRESHOLD", "30"))
-KEEP_RECENT = int(os.getenv("RPG_KEEP_RECENT_MESSAGES", "8"))
-STATE_EXTRACT_EVERY_TURNS = max(1, int(os.getenv("RPG_STATE_EVERY_TURNS", "1")))
-STATE_CONTEXT_MESSAGES = max(4, min(12, int(os.getenv("RPG_STATE_CONTEXT_MESSAGES", "6"))))
+MAX_MESSAGES_BEFORE_SUMMARY = 24
+KEEP_RECENT = 10
 
 
 def summarize_old_messages(messages):
-    """Create a rolling campaign summary only when explicitly requested by /api/compact."""
+    """Rolling summary: retain one summary and a bounded recent dialogue window."""
     if not isinstance(messages, list):
         return messages
     system_messages = [m for m in messages if m.get("role") == "system"]
@@ -453,17 +418,16 @@ def summarize_old_messages(messages):
                             if m.get("content", "").startswith("[РЕЗЮМЕ ПРОШЛОГО]")), "")
     other_system = [m for m in system_messages if not m.get("content", "").startswith("[РЕЗЮМЕ ПРОШЛОГО]")]
     if len(dialogue) <= MAX_MESSAGES_BEFORE_SUMMARY:
-        return messages
-    keep_recent = max(4, min(KEEP_RECENT, 16))
-    to_summarize = dialogue[:-keep_recent]
-    recent = dialogue[-keep_recent:]
+        return other_system + ([{"role": "system", "content": existing_summary}] if existing_summary else []) + dialogue
+    to_summarize = dialogue[:-KEEP_RECENT]
+    recent = dialogue[-KEEP_RECENT:]
     text_to_summarize = "\n".join(f"{m['role']}: {m.get('content','')}" for m in to_summarize if m.get("content"))
     if not text_to_summarize.strip():
-        return messages
+        return other_system + ([{"role": "system", "content": existing_summary}] if existing_summary else []) + dialogue
     archive_input = (existing_summary + "\n\nНОВЫЕ СОБЫТИЯ:\n" if existing_summary else "") + text_to_summarize
     try:
         resp = client.chat.completions.create(
-            model=SUMMARY_MODEL,
+            model=MODEL,
             messages=[{"role": "system", "content": SUMMARY_PROMPT},
                      {"role": "user", "content": f"Материал для обновления памяти:\n{archive_input}\n\nОбнови резюме, сохранив старые важные факты и добавив новые."}],
             temperature=0.2,
@@ -473,7 +437,6 @@ def summarize_old_messages(messages):
             return messages
         return other_system + [{"role": "system", "content": f"[РЕЗЮМЕ ПРОШЛОГО]\n{summary}"}] + recent
     except Exception:
-        app.logger.exception("Campaign summary generation failed")
         return messages
 
 
@@ -493,7 +456,7 @@ def roll_dice(expr):
 
 
 def clean_json(text):
-    text = text.rsplit("</think>", 1)[-1].strip()
+    text = text.strip()
     text = re.sub(r"^```(?:json)?\s*", "", text)
     text = re.sub(r"\s*```$", "", text)
     start = text.find("{")
@@ -504,33 +467,17 @@ def clean_json(text):
 
 
 def normalize_quest(q):
+    if isinstance(q, dict):
+        return q
     if isinstance(q, str):
-        q = {"name": q}
-    if not isinstance(q, dict):
-        return None
-    name = q.get("name") or q.get("title") or q.get("id")
-    if not isinstance(name, str) or not name.strip():
-        return None
-    return {**q, "name": name.strip()}
-
-
-def merge_quests(previous, updates):
-    quests = []
-    for entry in [*previous, *updates]:
-        quest = normalize_quest(entry)
-        if quest is None:
-            continue
-        for i, old in enumerate(quests):
-            same_id = quest.get("id") and quest["id"] == old.get("id")
-            same_name = quest["name"].casefold() == old["name"].casefold()
-            compatible_ids = any(not v or str(v).startswith("legacy-")
-                                 for v in (old.get("id"), quest.get("id")))
-            if same_id or (same_name and compatible_ids):
-                quests[i] = {**old, **quest}
-                break
-        else:
-            quests.append(quest)
-    return quests
+        return {
+            "id": "legacy-" + str(random.randint(1000, 9999)),
+            "name": q, "type": "side", "status": "active",
+            "chain": "", "chain_order": 0,
+            "stages": [], "current_stage": 0,
+            "rewards": {}, "giver": "", "location": ""
+        }
+    return None
 
 
 def normalize_note(n):
@@ -581,20 +528,12 @@ def xp_threshold_for_level(level):
 XP_EVENT_RE = re.compile(r"\+\s*(\d+)\s*XP\b", re.IGNORECASE)
 
 
-def message_event_id(message, index=None):
-    # Stable across history compaction/reindexing; duplicate identical GM messages
-    # with the same XP line are intentionally treated as one event.
-    raw = f"{message.get('role','')}\0{message.get('content','')}"
-    return hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()
-
-
-def legacy_message_event_id(message, index):
-    """Recognize XP IDs created by older builds (they included the message index)."""
+def message_event_id(message, index):
     raw = f"{index}\0{message.get('role','')}\0{message.get('content','')}"
     return hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()
 
 
-def extract_state(messages, current_state, repair=False):
+def extract_state(messages, current_state):
     current = dict(DEFAULT_STATE)
     if isinstance(current_state, dict):
         current.update(current_state)
@@ -614,77 +553,35 @@ def extract_state(messages, current_state, repair=False):
         if m.get("role") != "assistant":
             continue
         content = m.get("content", "")
-        event_id = message_event_id(m)
-        if event_id in current["xp_event_ids"] or legacy_message_event_id(m, index) in current["xp_event_ids"]:
+        event_id = message_event_id(m, index)
+        if event_id in current["xp_event_ids"]:
             continue
         matches = [int(x) for x in XP_EVENT_RE.findall(content)]
         if matches:
             fresh_events.append((event_id, sum(matches)))
 
-    # XP is processed deterministically below and must NOT trigger the costly
-    # state-extraction LLM call. Run the state parser on cadence or on non-XP
-    # events that can change the character sheet.
-    counter = max(0, int(current.get("state_extract_counter", 0) or 0)) + 1
-    current["state_extract_counter"] = counter
-    last_assistant = next((m.get("content", "") for m in reversed(messages)
-                           if m.get("role") == "assistant"), "")
-    event_pattern = re.compile(
-        r"\b(?:HP|ХП)\s*\d+|"
-        r"(?:квест|инвентар|уровень\s+повышен|"
-        r"добавлено\s+в\s+инвентарь|удалено\s+из\s+инвентаря|"
-        r"получено\s+\d+\s+(?:золот|монет)|потрачено\s+\d+\s+(?:золот|монет)|"
-        r"навык|умени|владени|способност|отдых|создан\s+персонаж|лист\s+персонажа)",
-        re.IGNORECASE,
-    )
-    first_character_setup = current.get("name") in (None, "", "Пустой")
-    incomplete = first_character_setup or not current.get("skills") or not current.get("abilities")
-    should_extract = repair or incomplete or counter % STATE_EXTRACT_EVERY_TURNS == 0 or bool(event_pattern.search(last_assistant))
-    new_state = {}
-    if should_extract:
-        history = [m for m in messages if m.get("role") in ("user", "assistant")
-                   or str(m.get("content", "")).startswith("[РЕЗЮМЕ ПРОШЛОГО]")]
-        recent = history if repair or incomplete else history[-STATE_CONTEXT_MESSAGES:]
-        dialogue = "\n".join(f"{m['role']}: {m['content']}" for m in recent if m.get("content"))
-        # Avoid sending the internal cadence counter to the model.
-        model_state = {k: v for k, v in current.items() if k != "state_extract_counter"}
-        prompt = (f"ТЕКУЩЕЕ СОСТОЯНИЕ:\n{json.dumps(model_state, ensure_ascii=False)}\n\n"
-                  f"ДИАЛОГ ПОСЛЕДНИХ ХОДОВ:\n{dialogue}\n\nВерни обновлённое состояние JSON."
-                  " Не меняй XP, уровень и xp_next; XP рассчитывается отдельно сервером.")
-        if repair:
-            prompt += " Восстанови актуальные имя, расу, класс, предысторию, владения, навыки и умения героя по сохранившейся истории."
-        for model in dict.fromkeys((STATE_MODEL, MODEL)):
-            try:
-                resp = client.chat.completions.create(
-                    model=model,
-                    messages=[{"role": "system", "content": STATE_EXTRACT_PROMPT},
-                              {"role": "user", "content": prompt}],
-                )
-                new_state = clean_json(resp.choices[0].message.content or "")
-                if not isinstance(new_state, dict) or not DEFAULT_STATE.keys() & new_state.keys():
-                    raise ValueError("В ответе нет полей листа")
-                break
-            except Exception:
-                app.logger.exception("Character state extraction failed")
-                new_state = {}
-    character_fields = ("name", "race", "class", "background", "proficiencies", "skills", "abilities")
-    if repair:
-        new_state = {k: v for k, v in new_state.items() if k in character_fields}
+    recent = messages[-14:]
+    dialogue = "\n".join(f"{m['role']}: {m['content']}" for m in recent if m.get("content"))
+    prompt = (f"ТЕКУЩЕЕ СОСТОЯНИЕ:\n{json.dumps(current, ensure_ascii=False)}\n\n"
+              f"ДИАЛОГ:\n{dialogue}\n\nВерни обновлённое состояние JSON."
+              " Не меняй XP, уровень и xp_next; XP рассчитывается отдельно сервером.")
+    try:
+        resp = client.chat.completions.create(
+            model=MODEL,
+            messages=[{"role": "system", "content": STATE_EXTRACT_PROMPT},
+                     {"role": "user", "content": prompt}],
+            temperature=0.1,
+        )
+        new_state = clean_json(resp.choices[0].message.content or "")
+    except Exception:
+        new_state = {}
 
-    warning = should_extract and not new_state
     merged = dict(current)
     for k, v in new_state.items():
-        if k not in DEFAULT_STATE or k in ("state_extract_counter", "xp_event_ids"):
-            continue
-        default = DEFAULT_STATE[k]
-        if type(default) is int:
-            try:
-                merged[k] = int(v)
-            except (TypeError, ValueError, OverflowError):
-                continue
-        elif isinstance(v, type(default)):
-            merged[k] = v.strip() if isinstance(v, str) else v
+        if v is not None:
+            merged[k] = v
     # Preserve arrays when the model accidentally returns empty/missing arrays.
-    for f in ("notes", "conditions", "relationships", "faction_clocks",
+    for f in ("inventory", "notes", "quests", "conditions", "relationships", "faction_clocks",
               "dc_modifier_reasons", "proficiencies", "skills", "abilities", "level_history"):
         old = current.get(f, [])
         new_items = merged.get(f, [])
@@ -710,8 +607,6 @@ def extract_state(messages, current_state, repair=False):
             processed.append(event_id)
     merged["xp"] = xp
     merged["xp_event_ids"] = processed[-500:]
-    if not isinstance(merged.get("name"), str) or merged["name"].strip() in ("", "Пустой"):
-        merged["name"] = current.get("name") or "Пустой"
     # Protect core scalar values from blank/null model output.
     for f in ("name", "race", "class", "background", "position", "cover", "weapon_in_hand"):
         if not merged.get(f) and current.get(f):
@@ -730,51 +625,20 @@ def extract_state(messages, current_state, repair=False):
     for f in ("inventory", "notes", "quests", "conditions", "relationships", "faction_clocks",
               "dc_modifier_reasons", "proficiencies", "skills", "abilities", "level_history", "xp_event_ids"):
         if not isinstance(merged.get(f), list): merged[f] = current.get(f, [])
-    old_quests = current.get("quests")
-    updates = new_state.get("quests")
-    merged["quests"] = merge_quests(old_quests if isinstance(old_quests, list) else [],
-                                   updates if isinstance(updates, list) else [])
+    merged["quests"] = [q for q in (normalize_quest(x) for x in merged["quests"]) if q]
     merged["notes"] = [n for n in (normalize_note(x) for x in merged["notes"]) if n]
-    if repair:
-        merged = {**current_state, **{k: merged[k] for k in character_fields}}
-    return merged, warning
+    return merged
 
 
 @app.route("/api/health")
 def api_health():
-    return jsonify({"ok": True, "model": MODEL, "state_model": STATE_MODEL,
-                   "summary_model": SUMMARY_MODEL, "base_url_configured": bool(BASE_URL),
-                   "provider": PROVIDER})
+    return jsonify({"ok": True, "model": MODEL, "base_url_configured": bool(BASE_URL),
+                   "provider": "local/compatible" if BASE_URL else "OpenAI-compatible cloud"})
 
 
 @app.route("/")
 def index():
-    return render_template("index.html", remote_avatars=bool(os.getenv("POLLINATIONS_API_KEY")))
-
-
-@app.post("/api/avatar")
-def api_avatar():
-    key = os.getenv("POLLINATIONS_API_KEY")
-    if not key:
-        return jsonify({"error": "Портреты создаются локально."}), 503
-    data = request.get_json(silent=True)
-    prompt = data.get("prompt") if isinstance(data, dict) else None
-    seed = data.get("seed") if isinstance(data, dict) else None
-    if not isinstance(prompt, str) or not 1 <= len(prompt) <= 1200 or type(seed) is not int or not 0 <= seed <= 999999:
-        return jsonify({"error": "Некорректные параметры портрета."}), 400
-    url = f"https://gen.pollinations.ai/image/{quote(prompt, safe='')}?width=256&height=256&seed={seed}"
-    upstream = Request(url, headers={"Authorization": f"Bearer {key}", "Accept": "image/*"})
-    try:
-        with urlopen(upstream, timeout=23) as result:
-            mime = result.headers.get_content_type()
-            if mime not in ("image/png", "image/jpeg", "image/webp"):
-                raise ValueError("image format")
-            image = result.read(2_000_001)
-            if not image or len(image) > 2_000_000:
-                raise ValueError("image size")
-            return Response(image, mimetype=mime)
-    except (OSError, ValueError):
-        return jsonify({"error": "Сервис портретов недоступен."}), 502
+    return render_template("index.html")
 
 
 @app.route("/api/roll", methods=["POST"])
@@ -796,10 +660,9 @@ def api_chat():
     if messages[0].get("role") != "system":
         messages = [{"role": "system", "content": SYSTEM_PROMPT}] + messages
     state_context = {k: v for k, v in (game_state.items() if isinstance(game_state, dict) else [])
-                    if k not in ("xp_event_ids", "state_extract_counter")}
+                    if k not in ("xp_event_ids",)}
     messages = messages[:1] + [{"role": "system", "content": "[АКТУАЛЬНОЕ СОСТОЯНИЕ ПЕРСОНАЖА — справочная информация, не меняй числа без игрового события]\n" + json.dumps(state_context, ensure_ascii=False)}] + messages[1:]
-    # History compaction is performed by /api/compact and persisted by the browser.
-    # Never summarize the same uncompressed browser history on every chat request.
+    messages = summarize_old_messages(messages)
 
     def generate():
         try:
@@ -833,17 +696,6 @@ def api_chat():
     return Response(generate(), mimetype="text/plain; charset=utf-8")
 
 
-@app.route("/api/compact", methods=["POST"])
-def api_compact():
-    """Compact and return browser history once it crosses the configured threshold."""
-    data = request.get_json(silent=True) or {}
-    messages = data.get("messages") or []
-    if not isinstance(messages, list):
-        return jsonify({"error": "messages must be a list"}), 400
-    compacted = summarize_old_messages(messages)
-    return jsonify({"messages": compacted, "compacted": len(compacted) < len(messages)})
-
-
 @app.route("/api/state", methods=["POST"])
 def api_state():
     data = request.get_json(silent=True) or {}
@@ -851,11 +703,7 @@ def api_state():
     state = data.get("state") or DEFAULT_STATE
     if not isinstance(messages, list) or not messages:
         return jsonify(state)
-    updated, warning = extract_state(messages, state, repair=data.get("repair") is True)
-    response = jsonify(updated)
-    if warning:
-        response.headers["X-Sheet-Sync"] = "failed"
-    return response
+    return jsonify(extract_state(messages, state))
 
 
 @app.route("/api/saves")
@@ -863,61 +711,10 @@ def api_saves_list():
     return jsonify(sorted(p.stem for p in SAVES_DIR.glob("*.json") if not p.name.endswith(".bak.json")))
 
 
-def safe_save_name(raw_name):
-    # Save names are restricted to safe filename characters and trimmed.
-    name = re.sub(r"[^a-zA-Z0-9_\-]", "", str(raw_name or ""))
-    return name[:64]
-
-
-@app.route("/api/save/rename", methods=["POST"])
-def api_save_rename():
-    data = request.get_json(silent=True) or {}
-    old_name = safe_save_name(data.get("old_name"))
-    new_name = safe_save_name(data.get("new_name"))
-    if not old_name or not new_name:
-        return jsonify({"error": "Укажите корректные имена сохранений (латиница, цифры, _ и -)."}), 400
-    old_path = SAVES_DIR / f"{old_name}.json"
-    new_path = SAVES_DIR / f"{new_name}.json"
-    if not old_path.exists():
-        return jsonify({"error": "Сохранение не найдено."}), 404
-    if old_name == new_name:
-        return jsonify({"ok": True, "name": new_name})
-    if new_path.exists():
-        return jsonify({"error": "Сохранение с таким именем уже существует."}), 409
-    try:
-        old_path.rename(new_path)
-        old_backup = SAVES_DIR / f"{old_name}.bak.json"
-        new_backup = SAVES_DIR / f"{new_name}.bak.json"
-        if old_backup.exists() and not new_backup.exists():
-            old_backup.rename(new_backup)
-    except OSError as e:
-        return jsonify({"error": f"Не удалось переименовать сохранение: {e}"}), 500
-    return jsonify({"ok": True, "name": new_name})
-
-
-@app.route("/api/save/delete", methods=["POST"])
-def api_save_delete():
-    data = request.get_json(silent=True) or {}
-    name = safe_save_name(data.get("name"))
-    if not name:
-        return jsonify({"error": "Некорректное имя сохранения."}), 400
-    path = SAVES_DIR / f"{name}.json"
-    if not path.exists():
-        return jsonify({"error": "Сохранение не найдено."}), 404
-    try:
-        path.unlink()
-        backup = SAVES_DIR / f"{name}.bak.json"
-        if backup.exists():
-            backup.unlink()
-    except OSError as e:
-        return jsonify({"error": f"Не удалось удалить сохранение: {e}"}), 500
-    return jsonify({"ok": True, "name": name})
-
-
 @app.route("/api/save", methods=["POST"])
 def api_save():
     data = request.get_json(silent=True) or {}
-    name = safe_save_name(data.get("name")) or "default"
+    name = re.sub(r"[^a-zA-Z0-9_\-]", "", data.get("name") or "") or "default"
     path = SAVES_DIR / f"{name}.json"
     payload = {"schema_version": 2, "messages": data.get("messages") or [],
                "state": data.get("state") or DEFAULT_STATE}
