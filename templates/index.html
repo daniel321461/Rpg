@@ -1065,10 +1065,62 @@ function diceResultHtml(roll) {
   const rolls = Array.isArray(roll.rolls) ? roll.rolls.map(n => esc(n)).join(' + ') : '';
   const mod = Number(roll.mod) || 0;
   const modText = mod === 0 ? '' : (mod > 0 ? ' + ' : ' − ') + Math.abs(mod);
-  return `<div class="dice-label">🎲 Бросок кубика</div>
+  const calc = rolls ? `${rolls}${modText} = ${esc(roll.total)}` : esc(roll.total);
+  const label = roll.label ? ` ${esc(String(roll.label).slice(0, 40))}` : ' кубика';
+  const dc = Number(roll.dc);
+  const difficulty = roll.dc !== undefined && roll.dc !== null && Number.isInteger(dc) && dc > 0 && dc <= 99
+    ? ` · Сложность ${dc}` : '';
+  return `<div class="dice-label">🎲 Бросок${label}</div>
     <div><b>${esc(roll.expr)}</b> → <span class="dice-total">${esc(roll.total)}</span></div>
-    <div class="dice-details">Кубики: ${rolls}${modText}</div>`;
+    <div class="dice-details">Расчёт: ${calc}${difficulty}</div>`;
 }
+/* Resolve the check most recently ANNOUNCED by the GM. A quick 1d20 roll
+   inherits its explicitly displayed modifier; never guess the modifier for
+   unrelated dice or override /roll 1d20+N entered by the player. */
+function pendingDeclaredCheck() {
+  const last = messages[messages.length - 1];
+  if (!last || last.role !== 'assistant') return null;
+  const text = String(last.content || '').slice(-600);
+  const checks = /(?:бросок|проверка|бросьте|киньте|кидайте|проверьте)[^\r\n]{0,180}/gi;
+  const stats = [
+    [/ловкост/i, 'dex', 'Ловкости'],
+    [/телосложен/i, 'con', 'Телосложения'],
+    [/интеллект/i, 'int', 'Интеллекта'],
+    [/мудрост/i, 'wis', 'Мудрости'],
+    [/харизм/i, 'cha', 'Харизмы'],
+    [/сил[аыуе]/i, 'str', 'Силы']
+  ];
+  let found = null;
+  for (const sectionMatch of text.matchAll(checks)) {
+    const section = sectionMatch[0];
+    const dice = /(?:1d20|d20)(?![\w])\s*([+\-−]\s*\d{1,2})?/i.exec(section);
+    if (!dice) continue;
+    const attribute = stats.find(([re]) => re.test(section));
+    let modifier = 0;
+    if (dice[1]) {
+      modifier = Number(dice[1].replace(/\s/g, '').replace('−', '-'));
+      // Example: 1d20+2 (Ловкость) +1 (Акробатика).
+      // Only accept another immediately adjacent, labelled bonus; never
+      // accidentally add a DC adjustment mentioned later in the scene.
+      const afterDice = section.slice(dice.index + dice[0].length);
+      const skill = /^(?:\s*\([^)]{1,40}\))?\s*([+\-−]\s*\d{1,2})(?=\s*(?:\(|$|[—–,]))/.exec(afterDice);
+      if (skill) modifier += Number(skill[1].replace(/\s/g, '').replace('−', '-'));
+    } else if (attribute) {
+      const score = Number(state && state.stats && state.stats[attribute[1]]);
+      if (Number.isFinite(score) && score >= 1 && score <= 30) {
+        modifier = Math.floor((score - 10) / 2);
+      }
+    }
+    const dcMatch = /(?:сложност[ьи]|\bDC\b|\bКС\b)\s*[:=№]?\s*(\d{1,2})(?!\d)/i.exec(section);
+    found = {
+      mod: Number.isInteger(modifier) ? modifier : 0,
+      label: attribute ? attribute[2] : '',
+      dc: dcMatch ? Number(dcMatch[1]) : null
+    };
+  }
+  return found;
+}
+
 function showUiEvent(event) {
   if (event.kind === 'character_sheet') return addHtmlMsg('character-sheet', characterSheetHtml(event.sheet || {}));
   if (event.kind === 'dice') return addHtmlMsg('dice', diceResultHtml(event.roll || {}));
@@ -1217,23 +1269,33 @@ function handleCommand(cmd, arg) {
 }
 async function doRoll(expr) {
   if (busy || rolling) return;
+  // A plain d20 means "roll the check you just asked for" when the GM
+  // announced one. Explicit /roll 1d20+N always takes priority.
+  const check = /^\s*(?:1d20|d20)\s*$/i.test(String(expr)) ? pendingDeclaredCheck() : null;
+  const effectiveExpr = check && check.mod
+    ? `1d20${check.mod > 0 ? '+' : ''}${check.mod}` : expr;
   rolling = true;
   const animDiv = addHtmlMsg('dice',
-    `<span class="dice-emoji">🎲</span> Бросок ${esc(expr)}...`);
+    `<span class="dice-emoji">🎲</span> Бросок ${esc(effectiveExpr)}...`);
   try {
     await new Promise(r => setTimeout(r, 450));
     const res = await apiFetch('/api/roll', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({expr})
+      body: JSON.stringify({expr: effectiveExpr})
     });
     const d = await res.json();
     if (!res.ok || d.error) throw new Error(d.error || 'Не удалось выполнить бросок');
     const mod = d.mod ? (d.mod > 0 ? '+' + d.mod : '' + d.mod) : '';
     animDiv.remove();
     // Show the roll card BEFORE the master's streamed response, and keep it in saves.
-    recordUiEvent({kind: 'dice', roll: {expr: d.expr, rolls: d.rolls, mod: d.mod, total: d.total}});
+    recordUiEvent({kind: 'dice', roll: {
+      expr: d.expr, rolls: d.rolls, mod: d.mod, total: d.total,
+      label: check ? check.label : '', dc: check ? check.dc : null
+    }});
     messages.push({role: 'user', content:
-      `[[БРОСОК]] ${d.expr} → [${d.rolls.join(', ')}]${mod} = ${d.total}. Сравни с DC, который ты объявил ранее. Опиши результат, успех/провал/осложнение. Не решай за игрока.`});
+      `[[БРОСОК]] ${d.expr} → [${d.rolls.join(', ')}]${mod} = ${d.total}. ` +
+      `Это ОКОНЧАТЕЛЬНЫЙ результат, бонус характеристики уже учтён: НЕ прибавляй модификаторы второй раз. ` +
+      `Сравни ${d.total} с DC, который ты объявил ранее. Опиши исход без повторного броска.`});
     persist();
     await callAI(messages);
   } catch(e) { animDiv.remove(); addMsg('system', 'Ошибка броска: ' + e.message); }
@@ -1642,6 +1704,7 @@ function doHelp() {
     '<code>/notes</code> — заметки, письма, документы<br>' +
     '<code>/save имя</code> — сохранить<br><code>/load имя</code> — загрузить<br>' +
     '<code>/reset</code> — новая игра<br><br>' +
+    'Быстрый d20 учитывает бонус последней проверки, объявленной мастером. Для ручного броска используйте /roll 1d20+3.<br>' +
     'Заметки, письма, документы, слухи — в отдельной вкладке 📝, не в инвентаре.<br>' +
     'XP начисляется за убийства, победы без убийства и завершённые квесты.');
 }
