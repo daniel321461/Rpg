@@ -2,6 +2,21 @@
 
 A local web RPG chat with character sheet, quests, notes, dice, save/load and an OpenAI-compatible model backend.
 
+## Yandex AI Studio (DeepSeek V4.1 Flash) на Railway
+
+Добавьте в Railway → ваш проект → сервис → Variables следующие переменные:
+
+- `YANDEX_API_KEY` — секретная часть API-ключа Yandex AI Studio.
+- `YANDEX_FOLDER_ID` — ID каталога, в котором создан сервисный аккаунт/API-ключ.
+- `YANDEX_MODEL` — необязательно. По умолчанию используется `gpt://<YANDEX_FOLDER_ID>/deepseek-v4.1-flash`.
+
+Для Yandex используется OpenAI-совместимый endpoint `https://ai.api.cloud.yandex.net/v1`.
+Ключ передаётся через переменные окружения; не помещайте его в исходники, README или GitHub.
+Если заданы `YANDEX_API_KEY` и `YANDEX_FOLDER_ID`, приложение автоматически выбирает Yandex AI Studio.
+Старые переменные `OPENAI_*` оставлены для совместимости с Ollama и другими OpenAI-совместимыми провайдерами.
+
+После добавления переменных перезапустите/redeploy сервис. Проверить состояние можно по `/api/health` — там отображаются провайдер и модель, но не секреты.
+
 ## Quick start (Windows)
 
 1. Install Python 3.10+.
@@ -49,3 +64,7 @@ Set `OPENAI_BASE_URL`, `OPENAI_API_KEY`, and `OPENAI_MODEL` to the provider's en
 - Level-up HP/stat/ability choices are still handled through the game conversation after the server announces an available level. The engine does not silently choose a stat or ability.
 - This is a patched prototype, not a fully deterministic D&D combat engine. Combat, spell effects, NPC motivations and quest logic still depend on the language model unless represented in the character state.
 - Back up your `saves/` folder before upgrading the project.
+
+### Управление сохранениями
+
+В боковом меню игры есть пункт **«Управление сохранениями»**. Там можно переименовать сохранение (кнопка с карандашом) или удалить его (кнопка с корзиной). Удаление также удаляет резервную копию `.bak.json` и требует подтверждения. Имена сохранений допускают латинские буквы, цифры, дефис и подчёркивание.
