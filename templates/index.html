@@ -747,7 +747,7 @@ function openCharacterCreator(world = null) {
       return;
     }
     const details = document.getElementById('creator-details').value.trim();
-    const description = `${world ? world.prompt + '\n' : ''}Мой персонаж: имя — ${name}; раса — ${race}; класс — ${cls}; предыстория — ${background}. ${details} Начни с создания листа персонажа и первой сцены приключения.`;
+    const description = `${world ? world.prompt + '\n' : ''}Мой персонаж: имя — ${name}; раса — ${race}; класс — ${cls}; предыстория — ${background}. ${details} Создай лист героя для профиля, но в ответе не перечисляй характеристики и умения: кратко представь героя и начни первую сцену в 4–6 коротких абзацах.`;
     startGame(description, {name, race, class: cls, background});
   };
   if (world) document.getElementById('creator-skip').onclick = () => {
