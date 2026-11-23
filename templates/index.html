@@ -129,6 +129,23 @@
     font-size: 14px; border-radius: 10px;
   }
   .msg.dice b { color: var(--accent-gold); }
+  .msg.dice .dice-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-secondary); margin-bottom: 5px; }
+  .msg.dice .dice-total { font-size: 21px; font-weight: 700; color: var(--accent-gold); }
+  .msg.dice .dice-details { font-size: 12px; margin-top: 4px; color: #d5bea8; overflow-wrap: anywhere; }
+  .msg.character-sheet {
+    align-self: flex-start; max-width: min(100%, 560px); width: 100%; white-space: normal;
+    background: linear-gradient(135deg, #30271c, #201c19); border: 1px solid #71582c;
+    padding: 14px; color: var(--text-primary);
+  }
+  .character-sheet .sheet-heading { font: bold 17px var(--font-serif); color: var(--accent-gold); margin-bottom: 7px; }
+  .character-sheet .sheet-meta { display: flex; flex-wrap: wrap; gap: 7px; font-size: 12px; color: var(--text-secondary); margin: 8px 0; }
+  .character-sheet .sheet-meta span { padding: 4px 7px; border: 1px solid #554333; border-radius: 7px; }
+  .character-sheet .sheet-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; margin-top: 10px; }
+  .character-sheet .sheet-stat { min-width: 0; border-radius: 8px; background: #1b1917; border: 1px solid #4c3b2a; padding: 8px 4px; text-align: center; }
+  .character-sheet .sheet-stat-name { font-size: 11px; color: var(--text-secondary); }
+  .character-sheet .sheet-stat-value { font-size: 19px; font-weight: 700; }
+  .character-sheet .sheet-stat-mod { color: var(--accent-gold); font-size: 12px; }
+  .character-sheet .sheet-footer { font-size: 12px; color: var(--text-secondary); margin-top: 10px; }
   .msg.dice .dice-emoji {
     display: inline-block; font-size: 20px; vertical-align: middle;
     animation: diceShake 0.35s ease-in-out infinite;
@@ -364,7 +381,7 @@
 <div id="modal"><div class="modal-content" id="modal-content"></div></div>
 
 <script>
-let messages = [], state = null, memory = {}, busy = false;
+let messages = [], state = null, memory = {}, uiEvents = [], busy = false, rolling = false;
 let authUser = 'owner', authToken = '';
 const AUTH_KEY = 'rpg_session_auth_v2';
 try { sessionStorage.removeItem('rpg_access_v1'); } catch(e) {}
@@ -415,7 +432,7 @@ const READY_WORLDS = [
 
 // Local campaigns are isolated between authenticated users in the same browser.
 function persist() {
-  try { localStorage.setItem(LS_KEY + '_' + authUser, JSON.stringify({messages, state, memory})); } catch(e){}
+  try { localStorage.setItem(LS_KEY + '_' + authUser, JSON.stringify({messages, state, memory, ui_events: uiEvents})); } catch(e){}
 }
 function restore() {
   try {
@@ -735,9 +752,9 @@ function openCharacterCreator(world = null) {
   document.getElementById('creator-cancel').onclick = () => modalEl.classList.remove('open');
   function startGame(description, hero = null) {
     modalEl.classList.remove('open');
-    messages = []; state = {...EMPTY_STATE, ...(hero || {})}; memory = {};
+    messages = []; state = {...EMPTY_STATE, ...(hero || {})}; memory = {}; uiEvents = [];
     ttsStop(); chatEl.innerHTML = ''; renderStatus(); persist();
-    sendMessage(description);
+    sendMessage(description, {characterCreated: !!hero});
   }
   document.getElementById('creator-submit').onclick = () => {
     const name = document.getElementById('creator-name').value.trim();
@@ -1005,8 +1022,68 @@ function addHtmlMsg(role, html) {
   chatEl.appendChild(d); scrollBottom(); return d;
 }
 
+/* Gameplay cards are local UI events, NOT model dialogue. Their position is
+   counted in dialogue messages, so dice/stats survive saved-game restore without
+   changing XP IDs or incremental campaign memory hashes. */
+const STAT_LABELS = [
+  ['str', 'СИЛ', 'Сила'], ['dex', 'ЛОВ', 'Ловкость'], ['con', 'ТЕЛ', 'Телосложение'],
+  ['int', 'ИНТ', 'Интеллект'], ['wis', 'МДР', 'Мудрость'], ['cha', 'ХАР', 'Харизма']
+];
+function snapshotCharacter(st) {
+  const s = st && typeof st === 'object' ? st : {};
+  const stats = {};
+  for (const [key] of STAT_LABELS) {
+    const n = Number((s.stats || {})[key]);
+    stats[key] = Number.isFinite(n) ? n : null;
+  }
+  return {
+    name: s.name || 'Герой', race: s.race || '', class: s.class || '',
+    background: s.background || '', level: s.level ?? 1,
+    hp: s.hp ?? 10, max_hp: s.max_hp ?? 10, xp: s.xp ?? 0,
+    xp_next: s.xp_next ?? 100, gold: s.gold ?? 0, stats
+  };
+}
+function characterSheetHtml(s) {
+  const stats = s.stats || {};
+  const statBoxes = STAT_LABELS.map(([key, shortName, longName]) => {
+    const val = Number(stats[key]);
+    const valid = stats[key] !== null && stats[key] !== undefined && Number.isFinite(val);
+    const modifier = valid ? Math.floor((val - 10) / 2) : null;
+    const modText = modifier === null ? '—' : (modifier >= 0 ? '+' : '') + modifier;
+    return `<div class="sheet-stat" title="${longName}"><div class="sheet-stat-name">${shortName}</div><div class="sheet-stat-value">${valid ? esc(val) : '—'}</div><div class="sheet-stat-mod">${modText}</div></div>`;
+  }).join('');
+  return `<div class="sheet-heading">📜 Лист героя · ${esc(s.name || 'Герой')}</div>
+    <div class="identity-tags">${characterIdentity(s)}</div>
+    <div class="sheet-meta"><span>⭐ Уровень ${esc(s.level ?? 1)}</span>
+    <span>❤️ HP ${esc(s.hp ?? 10)}/${esc(s.max_hp ?? 10)}</span>
+    <span>✨ XP ${esc(s.xp ?? 0)}/${esc(s.xp_next ?? 100)}</span>
+    <span>🪙 Золото ${esc(s.gold ?? 0)}</span></div>
+    <div class="sheet-stats">${statBoxes}</div>
+    <div class="sheet-footer">Полный лист и умения — в профиле персонажа.</div>`;
+}
+function diceResultHtml(roll) {
+  const rolls = Array.isArray(roll.rolls) ? roll.rolls.map(n => esc(n)).join(' + ') : '';
+  const mod = Number(roll.mod) || 0;
+  const modText = mod === 0 ? '' : (mod > 0 ? ' + ' : ' − ') + Math.abs(mod);
+  return `<div class="dice-label">🎲 Бросок кубика</div>
+    <div><b>${esc(roll.expr)}</b> → <span class="dice-total">${esc(roll.total)}</span></div>
+    <div class="dice-details">Кубики: ${rolls}${modText}</div>`;
+}
+function showUiEvent(event) {
+  if (event.kind === 'character_sheet') return addHtmlMsg('character-sheet', characterSheetHtml(event.sheet || {}));
+  if (event.kind === 'dice') return addHtmlMsg('dice', diceResultHtml(event.roll || {}));
+}
+function recordUiEvent(event) {
+  uiEvents.push({...event, at: messages.length});
+  showUiEvent(event);
+  persist();
+}
+function isCharacterReady(s) {
+  return !!(s && s.name && s.name !== 'Пустой' && (s.race || s.class));
+}
+
 /* API CALLS */
-async function callAI(msgs) {
+async function callAI(msgs, options = {}) {
   busy = true; sendBtn.disabled = true;
   document.querySelectorAll('.quick-btn').forEach(b => b.disabled = true);
   if (tts.speaking) ttsStop();
@@ -1055,7 +1132,13 @@ async function callAI(msgs) {
         ttsSpeak(full, btn);
       }, 60);
     }
-    await updateState();
+    const wasEmptyCharacter = !isCharacterReady(state);
+    const stateOk = await updateState();
+    if (stateOk && isCharacterReady(state) &&
+        (options.characterCreated || wasEmptyCharacter) &&
+        !uiEvents.some(e => e.kind === 'character_sheet')) {
+      recordUiEvent({kind: 'character_sheet', sheet: snapshotCharacter(state)});
+    }
     await updateMemory();
   }
   busy = false; sendBtn.disabled = false;
@@ -1077,9 +1160,12 @@ async function updateState() {
         addMsg('system', `🎉 Доступно повышение уровня: ${state.level} (получено уровней: ${gained}). Обсуди с мастером выбор повышения характеристик и умения.`);
       }
       renderStatus(); persist();
+      return true;
     }
+    return false;
   } catch(e) {
     addMsg('system', 'Не удалось обновить лист персонажа: ' + e.message);
+    return false;
   }
 }
 
@@ -1098,8 +1184,8 @@ async function updateMemory() {
 }
 
 /* SEND */
-async function sendMessage(text) {
-  if (busy) return;
+async function sendMessage(text, options = {}) {
+  if (busy || rolling) return;
   text = (text || '').trim();
   if (!text) return;
   if (text.startsWith('/')) {
@@ -1114,7 +1200,7 @@ async function sendMessage(text) {
   messages.push({role: 'user', content: text});
   persist();
   inputEl.value = ''; autosize();
-  await callAI(messages);
+  await callAI(messages, options);
 }
 function handleCommand(cmd, arg) {
   switch(cmd) {
@@ -1130,24 +1216,28 @@ function handleCommand(cmd, arg) {
   }
 }
 async function doRoll(expr) {
-  if (busy) return;
+  if (busy || rolling) return;
+  rolling = true;
   const animDiv = addHtmlMsg('dice',
     `<span class="dice-emoji">🎲</span> Бросок ${esc(expr)}...`);
-  await new Promise(r => setTimeout(r, 450));
-  animDiv.remove();
   try {
+    await new Promise(r => setTimeout(r, 450));
     const res = await apiFetch('/api/roll', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({expr})
     });
     const d = await res.json();
-    if (d.error) { addMsg('system', 'Ошибка броска: ' + d.error); return; }
-    const m = d.mod ? (d.mod > 0 ? '+' + d.mod : '' + d.mod) : '';
-    addHtmlMsg('dice', `🎲 <b>${esc(d.expr)}</b> → [${d.rolls.join(', ')}]${m} = <b>${d.total}</b>`);
+    if (!res.ok || d.error) throw new Error(d.error || 'Не удалось выполнить бросок');
+    const mod = d.mod ? (d.mod > 0 ? '+' + d.mod : '' + d.mod) : '';
+    animDiv.remove();
+    // Show the roll card BEFORE the master's streamed response, and keep it in saves.
+    recordUiEvent({kind: 'dice', roll: {expr: d.expr, rolls: d.rolls, mod: d.mod, total: d.total}});
     messages.push({role: 'user', content:
-      `[[БРОСОК]] ${d.expr} → [${d.rolls.join(', ')}]${m} = ${d.total}. Сравни с DC, который ты объявил ранее. Опиши результат, успех/провал/осложнение. Не решай за игрока.`});
-    persist(); await callAI(messages);
-  } catch(e) { addMsg('system', 'Ошибка: ' + e.message); }
+      `[[БРОСОК]] ${d.expr} → [${d.rolls.join(', ')}]${mod} = ${d.total}. Сравни с DC, который ты объявил ранее. Опиши результат, успех/провал/осложнение. Не решай за игрока.`});
+    persist();
+    await callAI(messages);
+  } catch(e) { animDiv.remove(); addMsg('system', 'Ошибка броска: ' + e.message); }
+  finally { rolling = false; }
 }
 
 /* SHEET */
@@ -1465,7 +1555,7 @@ async function doSave(name) {
   try {
     const res = await apiFetch('/api/save', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({name, messages, state, memory})
+      body: JSON.stringify({name, messages, state, memory, ui_events: uiEvents})
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const d = await res.json();
@@ -1489,6 +1579,7 @@ async function doLoad(name) {
     messages = d.messages || [];
     state = d.state || {...EMPTY_STATE};
     memory = d.memory || {};
+    uiEvents = Array.isArray(d.ui_events) ? d.ui_events : [];
     persist(); renderAll(); renderStatus();
     await updateMemory();
     addMsg('system', `📂 Загружено: «${name}»`);
@@ -1541,7 +1632,7 @@ async function manageSaves() {
 
 function doReset() {
   if (!confirm('Начать новую игру? Текущая история будет потеряна.')) return;
-  messages = []; state = {...EMPTY_STATE}; memory = {};
+  messages = []; state = {...EMPTY_STATE}; memory = {}; uiEvents = [];
   ttsStop();
   persist(); chatEl.innerHTML = ''; renderStatus(); showIntro();
 }
@@ -1556,14 +1647,33 @@ function doHelp() {
 }
 function renderAll() {
   chatEl.innerHTML = '';
-  messages.forEach(m => {
+  // Event positions point to the *next* dialogue message; events at the end
+  // are rendered after the most recent reply. Ignore invalid legacy entries.
+  const events = new Map();
+  (Array.isArray(uiEvents) ? uiEvents : []).forEach(event => {
+    if (!event || !Number.isInteger(event.at) || event.at < 0 || event.at > messages.length) return;
+    if (!['dice', 'character_sheet'].includes(event.kind)) return;
+    if (!events.has(event.at)) events.set(event.at, []);
+    events.get(event.at).push(event);
+  });
+  for (let i = 0; i <= messages.length; i++) {
+    for (const event of (events.get(i) || [])) showUiEvent(event);
+    if (i === messages.length) break;
+    const m = messages[i];
     if (m.role === 'user') {
-      const c = m.content.replace(/^\[\[(БРОСОК|СИСТЕМА)\]\]\s*/, '');
-      addMsg('user', c);
+      if (m.content.startsWith('[[БРОСОК]]')) {
+        // New dice cards already appear above; old saves still show the result.
+        if (!(events.get(i) || []).some(e => e.kind === 'dice')) {
+          const rollText = m.content.replace(/^\[\[БРОСОК\]\]\s*/, '').split('. Сравни с DC')[0];
+          addMsg('dice', '🎲 ' + rollText);
+        }
+      } else {
+        addMsg('user', m.content.replace(/^\[\[СИСТЕМА\]\]\s*/, ''));
+      }
     } else if (m.role === 'assistant') {
       addMsg('master', m.content);
     }
-  });
+  }
   const lastMaster = [...messages].reverse().find(m => m.role === 'assistant');
   if (lastMaster) tts.lastText = lastMaster.content;
 }
@@ -1738,6 +1848,7 @@ async function init() {
     messages = saved.messages;
     state = saved.state || {...EMPTY_STATE};
     memory = saved.memory || {};
+    uiEvents = Array.isArray(saved.ui_events) ? saved.ui_events : [];
     // Совместимость
     if (!Array.isArray(state.relationships)) state.relationships = [];
     if (!Array.isArray(state.faction_clocks)) state.faction_clocks = [];

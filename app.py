@@ -1150,9 +1150,14 @@ def api_save():
     data = request.get_json(silent=True) or {}
     name = safe_save_name(data.get("name")) or "default"
     path = user_saves_dir() / f"{name}.json"
-    payload = {"schema_version": 3, "messages": data.get("messages") or [],
+    # UI-only cards are stored separately from the model's dialogue/XP history.
+    ui_events = data.get("ui_events") or []
+    if not isinstance(ui_events, list):
+        ui_events = []
+    payload = {"schema_version": 4, "messages": data.get("messages") or [],
                "state": data.get("state") or DEFAULT_STATE,
-               "memory": data.get("memory") or {}}
+               "memory": data.get("memory") or {},
+               "ui_events": ui_events[:2000]}
     serialized = json.dumps(payload, ensure_ascii=False, indent=2)
     # Backup previous file before replacing; atomic replace avoids partial JSON on crash.
     if path.exists():
