@@ -45,30 +45,51 @@ _ENV_FILE = _load_env()
 
 app = Flask(__name__)
 
-MODEL = (os.getenv("OPENAI_MODEL") or "gpt-4o-mini").strip()
-BASE_URL = (os.getenv("OPENAI_BASE_URL") or "").strip() or None
-API_KEY = (os.getenv("OPENAI_API_KEY") or "").strip()
-if not API_KEY and BASE_URL:
-    API_KEY = "ollama"
-if not API_KEY:
-    raise SystemExit(
-        "Не задан OPENAI_API_KEY.\n"
-        "Railway → ваш проект → Variables → New Variable: OPENAI_API_KEY\n"
-        "Локально → скопируйте .env.example в .env и впишите ключ."
-    )
-
 LLM_TIMEOUT = float(os.getenv("LLM_TIMEOUT", "300"))
-client = OpenAI(api_key=API_KEY, base_url=BASE_URL, timeout=LLM_TIMEOUT, max_retries=1)
+YANDEX_API_KEY = (os.getenv("YANDEX_API_KEY") or "").strip()
+YANDEX_FOLDER_ID = (os.getenv("YANDEX_FOLDER_ID") or "").strip()
+USE_YANDEX = bool(YANDEX_API_KEY)
+PROVIDER = "Yandex AI Studio" if USE_YANDEX else "OpenAI-compatible"
+KEY_VARIABLE = "YANDEX_API_KEY" if USE_YANDEX else "OPENAI_API_KEY"
+MODEL_VARIABLE = "YANDEX_MODEL" if USE_YANDEX else "OPENAI_MODEL"
 
-# Служебные вызовы (извлечение состояния, резюме) идут КАЖДЫЙ ход.
-# Их обязательно уводить на дешёвую/быструю модель.
-EXTRACT_MODEL = (os.getenv("EXTRACT_MODEL") or "").strip() or MODEL
-SUMMARY_MODEL = (os.getenv("SUMMARY_MODEL") or "").strip() or MODEL
+
+def _model_id(value):
+    if USE_YANDEX and not value.startswith("gpt://"):
+        return f"gpt://{YANDEX_FOLDER_ID}/{value}"
+    return value
+
+
+client_options = {"timeout": LLM_TIMEOUT, "max_retries": 1}
+if USE_YANDEX:
+    if not YANDEX_FOLDER_ID:
+        raise SystemExit("Для Yandex AI Studio задайте YANDEX_FOLDER_ID в Railway Variables.")
+    BASE_URL = "https://ai.api.cloud.yandex.net/v1"
+    API_KEY = YANDEX_API_KEY
+    MODEL = _model_id((os.getenv("YANDEX_MODEL") or "").strip() or "deepseek-v4.1-flash")
+    client_options["project"] = YANDEX_FOLDER_ID
+else:
+    BASE_URL = (os.getenv("OPENAI_BASE_URL") or "").strip() or None
+    API_KEY = (os.getenv("OPENAI_API_KEY") or "").strip()
+    MODEL = (os.getenv("OPENAI_MODEL") or "").strip() or "gpt-4o-mini"
+    if not API_KEY and BASE_URL:
+        API_KEY = "ollama"
+    if not API_KEY:
+        raise SystemExit(
+            "В Railway Variables задайте YANDEX_API_KEY и YANDEX_FOLDER_ID для Yandex AI Studio "
+            "или OPENAI_API_KEY для OpenAI."
+        )
+
+client = OpenAI(api_key=API_KEY, base_url=BASE_URL, **client_options)
+
+# Без отдельных настроек служебные запросы используют основную модель.
+EXTRACT_MODEL = _model_id((os.getenv("EXTRACT_MODEL") or "").strip() or MODEL)
+SUMMARY_MODEL = _model_id((os.getenv("SUMMARY_MODEL") or "").strip() or MODEL)
 
 print(
     f"[boot] env={_ENV_FILE.name if _ENV_FILE else 'нет (только переменные окружения)'} | "
-    f"model={MODEL} | base_url={BASE_URL or 'https://api.openai.com/v1'} | "
-    f"key={API_KEY[:4]}… | timeout={LLM_TIMEOUT:g}s",
+    f"provider={PROVIDER} | model={MODEL} | base_url={BASE_URL or 'https://api.openai.com/v1'} | "
+    f"timeout={LLM_TIMEOUT:g}s",
     flush=True,
 )
 if BASE_URL and ("127.0.0.1" in BASE_URL or "localhost" in BASE_URL):
@@ -152,15 +173,19 @@ def _error_hint(exc):
     low = str(exc).lower()
     status = getattr(exc, "status_code", None)
     if status == 401 or "unauthorized" in low or "invalid api key" in low:
-        return "Ключ не принят. Проверьте OPENAI_API_KEY в Variables."
+        return f"Ключ не принят. Проверьте {KEY_VARIABLE} в Railway Variables."
+    if status == 403 and USE_YANDEX:
+        return "Доступ запрещён. Проверьте YANDEX_FOLDER_ID и права ключа Yandex AI Studio."
     if status == 402 or "insufficient" in low or "credit" in low or "quota" in low:
         return "У провайдера закончились средства. Пополните счёт или смените модель."
     if status == 429 or "rate limit" in low:
         return "Провайдер ограничивает частоту. Подождите минуту или смените модель."
     if status == 404 or ("model" in low and "not found" in low):
-        return "Модель не найдена. Проверьте OPENAI_MODEL — список виден в /api/diag."
+        return f"Модель не найдена. Проверьте {MODEL_VARIABLE} в Railway Variables."
     if ("connection" in low or "refused" in low or "timed out" in low
             or "name or service" in low):
+        if USE_YANDEX:
+            return "Нет связи с Yandex AI Studio. Проверьте соединение и логи Railway."
         return ("Нет связи с моделью. Проверьте OPENAI_BASE_URL: на Railway "
                 "адрес 127.0.0.1 указывает на сам контейнер, где Ollama нет.")
     if "context" in low and ("length" in low or "token" in low):
@@ -924,6 +949,7 @@ def _save_info(name, path):
 def api_health():
     return jsonify({
         "ok": True,
+        "provider": PROVIDER,
         "model": MODEL,
         "extract_model": EXTRACT_MODEL,
         "summary_model": SUMMARY_MODEL,
@@ -940,6 +966,7 @@ def api_health():
 def api_diag():
     """Диагностика: что настроено и что реально отвечает провайдер."""
     result = {
+        "provider": PROVIDER,
         "model": MODEL,
         "extract_model": EXTRACT_MODEL,
         "summary_model": SUMMARY_MODEL,
@@ -963,10 +990,12 @@ def api_diag():
             if not ok:
                 raise RuntimeError("нет свободного слота модели")
             resp = client.chat.completions.create(
-                model=MODEL, temperature=0, max_tokens=8,
+                model=MODEL, temperature=0, max_tokens=256 if USE_YANDEX else 8,
                 messages=[{"role": "user", "content": "Ответь одним словом: ок"}])
-        result["ping_ok"] = True
         result["ping"] = (resp.choices[0].message.content or "").strip()
+        result["ping_ok"] = bool(result["ping"])
+        if not result["ping_ok"]:
+            result["ping_error"] = "Модель вернула пустой ответ."
     except Exception as exc:
         result["ping_ok"] = False
         result["ping_error"] = _short_error(exc)
