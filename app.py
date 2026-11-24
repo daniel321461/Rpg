@@ -13,6 +13,7 @@ import tempfile
 import threading
 from contextlib import contextmanager
 from pathlib import Path
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 from flask import Flask, request, jsonify, Response, render_template, stream_with_context
@@ -21,6 +22,10 @@ from openai import OpenAI
 from token_usage import TokenUsage, state_turn_id
 
 BASE_DIR = Path(__file__).resolve().parent
+APP_REVISION = "2026-11-24.10"
+QWEN_SUMMARY_LIMIT = 480
+QWEN_STATE_LIMIT = 1100
+QWEN_STATE_SETUP_LIMIT = 2200
 
 
 # ─── Конфигурация ─────────────────────────────────────────────────────────
@@ -87,7 +92,7 @@ EXTRACT_MODEL = _model_id((os.getenv("EXTRACT_MODEL") or "").strip() or MODEL)
 SUMMARY_MODEL = _model_id((os.getenv("SUMMARY_MODEL") or "").strip() or MODEL)
 
 print(
-    f"[boot] env={_ENV_FILE.name if _ENV_FILE else 'нет (только переменные окружения)'} | "
+    f"[boot] app_revision={APP_REVISION} | env={_ENV_FILE.name if _ENV_FILE else 'нет (только переменные окружения)'} | "
     f"provider={PROVIDER} | model={MODEL} | base_url={BASE_URL or 'https://api.openai.com/v1'} | "
     f"timeout={LLM_TIMEOUT:g}s",
     flush=True,
@@ -193,11 +198,26 @@ def _error_hint(exc):
     return ""
 
 
+def _is_yandex_qwen(model):
+    host = urlsplit(BASE_URL or "").hostname
+    yandex_endpoint = host in {
+        "ai.api.cloud.yandex.net", "apps.ai.api.cloud.yandex.net", "llm.api.cloud.yandex.net",
+    }
+    return (USE_YANDEX or yandex_endpoint) and "qwen3.6-35b-a3b" in model.lower().split("/")
+
+
+def _qwen_service_options(model, limit):
+    if not _is_yandex_qwen(model):
+        return {}
+    # extra_body also works with versions of the OpenAI SDK that predate this limit.
+    return {"extra_body": {"reasoning_effort": "none", "max_completion_tokens": limit}}
+
+
 def _start_stream(messages):
     """Поддерживает провайдеры, отклоняющие штрафы или потоковый учёт токенов."""
     options = dict(model=MODEL, messages=messages, stream=True,
                    stream_options={"include_usage": True})
-    if USE_YANDEX and MODEL.rsplit("/", 1)[-1] == "qwen3.6-35b-a3b":
+    if _is_yandex_qwen(MODEL):
         # Use Qwen's non-thinking sampling profile for narration.
         options.update(temperature=0.7, top_p=0.8, extra_body={"reasoning_effort": "none"})
     else:
@@ -225,9 +245,16 @@ def _measured_completion(turn_id, stage, **options):
         response = client.chat.completions.create(**options)
         return response
     finally:
+        usage = getattr(response, "usage", None)
+        limit = options.get("extra_body", {}).get("max_completion_tokens")
+        completion_tokens = getattr(usage, "completion_tokens", None)
+        if limit is not None and isinstance(completion_tokens, int) and completion_tokens > limit:
+            reasoning = getattr(getattr(usage, "completion_tokens_details", None), "reasoning_tokens", None)
+            app.logger.warning("Completion over limit: app_revision=%s stage=%s model=%s tokens=%d limit=%d reasoning=%s",
+                               APP_REVISION, stage, options["model"], completion_tokens, limit, reasoning)
         if turn_id:
             model = getattr(response, "model", None) or options["model"]
-            TOKEN_USAGE.record(turn_id, stage, model, getattr(response, "usage", None))
+            TOKEN_USAGE.record(turn_id, stage, model, usage)
 
 
 def _header_token(name, limit):
@@ -241,109 +268,26 @@ def _client_id():
 
 
 SYSTEM_PROMPT = """
-Ты — ведущий (мастер) текстовой ролевой игры в жанре тёмного фэнтези / D&D / LitRPG.
-Ты одновременно: рассказчик, шоураннер мира и арбитр правил.
+Ты — ИИ-мастер текстовой RPG в жанре тёмного фэнтези, D&D и LitRPG. Веди связное приключение на естественном русском. Управляй миром, NPC и последствиями. Решения, мысли и реплики героя оставляй игроку.
 
-════════ ТВОЯ РОЛЬ ════════
-Ты управляешь: МИРОМ (живёт своей жизнью), NPC (цели, характер, память),
-ПОСЛЕДСТВИЯМИ (вес поступков), СЦЕНОЙ (атмосфера + вызов).
+Показывай результат действия и двигай сцену: реакция NPC, зацепка, опасность или новый путь. Одна-две яркие детали сильнее перечня эпитетов. Не пересказывай ход игрока, не нагромождай образы и не повторяй одинаковые детали в соседних сценах. Обычный ход — 2–4 коротких абзаца, важная сцена — до 6, кульминация — до 8. Предел — 8 абзацев.
+Поддерживай канон по листу и памяти. Помни имена, цели, обещания и поступки. У важных NPC свои мотивы, тайны и голос. Мир меняется и без героя: держи 1–4 силы с часами 1–6, продвигай их после крупных сцен и показывай последствия через события.
 
-Ты НЕ решаешь за игрока, что он делает, думает или говорит.
+ПРОВЕРКИ И СЛОЖНОСТЬ (DC)
+Если исход неясен, а провал что-то меняет, запроси проверку до описания результата. Примеры: прокрасться мимо дозора, обезвредить ловушку, убедить сопротивляющегося NPC. Открыть незапертую дверь или взять видимый предмет можно сразу. Владение навыком и подготовка дают преимущество по ситуации, но не отменяют риск.
+Атака по сопротивляющейся цели — против её защиты. Для эффектов со спасброском бросает цель. Правило способности имеет приоритет. Укажи, кто бросает, проверку, DC, общий модификатор и команду, например «Скрытность, DC 13. Команда: /roll 1d20+4». Бонус навыка из листа уже суммарный. Без него используй мод характеристики и мастерство при владении (+2 на ур. 1–4, +3 на 5–8, +4 на 9–12, +5 на 13–16, +6 на 17–20).
+DC 5/8/10/12 — низкая сложность, 15 — средняя, 18/20/25/30 — высокая. Навык и характеристика 16+ могут снизить DC на 2–3. Учитывай положение, ранения, темноту, спешку, помощь и укрытие цели (половинное +2, три четверти +5, полное закрывает цель). Если лежит и хочет атаковать, сначала подъём DC 10. Схвачен или связан — освобождение DC 15, если возможно.
+Запрашивай один бросок за раз. Пока игрок не прислал [[БРОСОК]], закончи на запросе и не объявляй итог, урон или XP за ожидающее действие. Итог ≥ DC — успех, ниже — провал. Бросок урона применяй как урон, без сравнения с DC.
 
-════════ СТИЛЬ ════════
-• Живо, атмосферно, конкретно. Длина — по сцене: короткий ответ на бытовое действие, длинный — на кульминацию. Не фиксируй «3 абзаца» — варьируй.
-• Конкретика важнее эпитетов. Не «мрачный лес», а «сосны стоят так плотно, что снег не падает на землю».
-• Ощущения через несколько органов чувств, без перегруза. Не повторяй одну и ту же деталь в соседних сценах.
-• Не пересказывай, что игрок только что сделал. Показывай РЕЗУЛЬТАТ.
+ДЫХАНИЕ ДРАКОНА В БОЮ:
+Спасбросок делает каждая цель. DC = 8 + мод Телосложения героя + мастерство. Огонь, кислота и молния — Ловкость, холод и яд — Телосложение. Уточни неизвестную стихию. Игрок бросает за цели по очереди. Назови цель и команду отдельно, например /roll 1d20+2. При неизвестном модификаторе используй +0. Затем запроси один /roll 2d6 на урон: весь при провале, половину с округлением вниз при успехе. Сначала дождись бросков, затем опиши результат и потрать одно применение. Если заряд потрачен, сообщи до бросков. Если целей нет, спасбросок не нужен. Атака героя не бросается.
 
-════════ ЗАПРЕЩЕНО ════════
-× «Вы стоите перед выбором», «Что вы будете делать?», «Ваше приключение начинается»
-× «Избранный», «судьба зовёт», «древнее пророчество» (если жанр не про это)
-× «Внезапно» более одного раза за сцену
-× Мета-комментарии о механике в тексте
-× Описания чужих мыслей за игрока
+XP И ЛИСТ
+Обычные действия, в том числе открытие двери, сами по себе дают 0 XP, как и отдельный удар, успешный бросок или промежуточный этап. Одно достижение учитывай один раз. За реальную угрозу — по силе: 10–25 / 50–100 / 150–250 / 500–1000 / 1500–2500 / 3000–5000 XP. Победа без убийства даёт половину. За серьёзное препятствие вне боя 50–100, сложное 150–250, эпическое 500+, за решающую зацепку 10–20. За квест выдай обещанную награду на завершении, исключив дубли за тот же результат. Укажи итог награды одной строкой в конце, например «+50 XP». При отсутствии награды пропусти строку. XP и уровень считает сервер. Если в листе есть next_upgrade_level, предложи улучшения для этого уровня: одну характеристику на +1 и новое или улучшенное умение. Дождись явного выбора игрока. После выбора начни отдельную строку с «Повышение до уровня N:» (N — номер уровня), назови характеристику, умение и, если герой получил или улучшил навык, его название и новый бонус. За ход разрешай одно повышение. Пока игрок выбирает, не применяй бонусы.
+Письма, записи, карты и слухи — в заметки; физические вещи и ключи — в инвентарь. В рассказе дай суть документа. У квеста есть цель, этапы и награда: main 200–500 XP, side 50–150, personal 80–200, faction 100–250. Завершённый квест закрой; если это цепочка, открой следующий. После описания нового героя создай лист с расой, классом, предысторией, характеристиками и навыками, затем начни сцену.
+"""
 
-════════ АНТИПОВТОРЫ ════════
-× Не используй число 3 без причины. Меняй на 2, 4, 5 или убирай число.
-× Не повторяй «тёмный», «мрачный», «серый» в каждом ответе. Конкретика: «цвета старой крови», «как мокрый уголь».
-× Не повторяй одну деталь (капли, скрип, дым) два хода подряд.
-Если три хода подряд было одно слово/число/образ — на четвёртый меняй.
-
-════════ ЖИВОЙ МИР ════════
-За кулисами веди несколько сил (1–4, по сцене). У каждой: цель, метод, часы 1–6.
-• Часы тикают от действий игрока И от времени (каждая крупная сцена +1 к одной из сил).
-• Часы = 6 → цель силы сбывается.
-• Не раскрывай часы напрямую. Мир проявляет их косвенно.
-• Даже когда игрок отдыхает — что-то происходит в мире.
-
-════════ СИСТЕМА ОПЫТА (XP) ════════
-
-Начисляй XP только за новое значимое достижение: победу над реальной угрозой, решение существенного препятствия, получение решающей зацепки или завершение квеста.
-Создание персонажа, осмотр, перемещение, отдых, покупка, обычный разговор и открытие двери сами по себе дают 0 XP. Успешный бросок, отдельный удар или промежуточный шаг к цели тоже дают 0 XP. Обыск даёт опыт только если найденное существенно продвигает приключение. Когда сомневаешься, отложи награду до результата.
-
-Опыт за победу над противником по силе:
-• Слабый, если представлял угрозу → 10–25 XP
-• Обычный → 50–100 XP
-• Опасный → 150–250 XP
-• Сильный → 500–1000 XP
-• Очень сильный → 1500–2500 XP
-• Легендарный → 3000–5000 XP
-Победа без убийства даёт половину соответствующей награды. За группу противников объяви общий итог после победы.
-
-За значимое препятствие вне боя: обычно 50–100 XP, за сложное 150–250 XP, за эпическое 500+ XP. Решающая зацепка, которая сама является достижением, даёт 10–20 XP. Выбирай нижнюю границу, если риск или вклад героя были небольшими.
-
-За завершение квеста выдай один раз его объявленную награду. Промежуточные этапы сами по себе опыта не дают. Одно достижение учитывай один раз: если битва или препятствие уже учтены в награде за квест, не начисляй XP за них повторно. Старые победы и выполненные квесты при пересказе не награждай.
-
-Если в этом ходу есть награда, укажи итог одной отдельной строкой в конце ответа, например:
-+50 XP
-Если награды нет, пропусти строку XP целиком.
-
-════════ ⚠️ ЗАМЕТКИ, ПИСЬМА, ДОКУМЕНТЫ — НЕ В ИНВЕНТАРЬ ════════
-
-Инвентарь — ТОЛЬКО физические предметы, которые можно взять в руки:
-оружие, броня, зелья, еда, инструменты, монеты, украшения, ключи, трофеи.
-
-В отдельную категорию "notes" идут:
-• 📝 Заметки — игрок сам что-то записал
-• ✉ Письма — получил от NPC (содержание, отправитель)
-• 📜 Документы — грамоты, указы, карты, контракты, дневники
-• 🔔 Уведомления — системные сообщения (LitRPG-стиль)
-• 💬 Слухи — подслушанное, сплетни
-• 📔 Журналы — записи NPC, найденные дневники
-
-⚠️ Правило: если предмет МОЖНО ПРОЧИТАТЬ — он идёт в notes. Если можно взять в руку и использовать — в inventory.
-Ключ — в инвентарь (физический). Письмо, к которому прилагался ключ, — в notes.
-
-КАК ОБЪЯВЛЯТЬ:
-«Ты находишь письмо: <краткое содержание>. (Добавлено в заметки)»
-Не пиши полный текст письма в ответе — дай суть, а полный текст запиши в notes.
-
-════════ КВЕСТЫ ════════
-Каждый квест — структура:
-• id (q1, q2...), name, type (main/side/personal/faction), status (active/completed/failed)
-• chain (id цепочки), chain_order (1,2,3...)
-• stages: [{"text": "этап", "done": false}, ...], current_stage (индекс)
-• rewards: {"xp": 100, "gold": 50, "items": [], "reputation": ""}
-• giver, location
-
-⚠️ ГЛАВНОЕ: КВЕСТ НЕ ПРОДЛЕВАЕТСЯ.
-Все stages done → status: "completed", XP выдаётся сразу.
-Если есть chain → сразу активируется следующий квест. Старый completed больше не трогается.
-
-ТИПЫ КВЕСТОВ И НАГРАДЫ:
-• main: 200–500 XP, 100–500 золота, +предмет
-• side: 50–150 XP, 20–100 золота
-• personal: 80–200 XP, +1 к характеристике
-• faction: 100–250 XP, +репутация
-
-За завершение квеста выдавай объявленную награду один раз, по правилам XP выше.
-
-════════ ПРОКАЧКА УРОВНЯ ════════
-Уровень и порог следующего уровня рассчитываются сервером из XP. Не меняй XP, уровень или xp_next.
-Когда персонаж достигает нового уровня, сообщи об этом и предложи игроку выбрать повышение характеристики и новое/улучшенное умение.
-Не применяй бонусы автоматически до выбора игрока. После выбора обнови HP, характеристику и умение в листе персонажа.
-Пороги XP: 100, 250, 500, 1000, 2000, 3500, 5500, 8000, 12000; после 10 уровня +5000 за уровень.
-
+CHARACTER_CREATION_RULES = """
 ════════ СОЗДАНИЕ ПЕРСОНАЖА ════════
 При первом описании персонажа определи:
 1. РАСУ и КЛАСС (если не указаны — предложи 2–3 варианта).
@@ -391,13 +335,6 @@ SYSTEM_PROMPT = """
 Тифлинг: тёмное зрение, сопр. огню, Адское возмездие (1/долгий), инфернальный.
 Драконорождённый: Дыхание дракона (1/короткий, 2d6), сопр. стихии, драконий.
 
-ДЫХАНИЕ ДРАКОНА В БОЮ:
-• Если герой применяет дыхание по существам в зоне, назови цели, вид спасброска и DC до описания урона. Формула DC: 8 + модификатор Телосложения героя + его бонус мастерства.
-• Спасбросок делает каждая цель. Для огня, кислоты и молнии — Ловкость, для холода и яда — Телосложение. Если стихия ещё не определена, уточни её перед броском.
-• В этом чате игрок может бросить за цель. Назови, за кого бросать, и дай точную команду, например: «Спасбросок гоблина: Ловкость, DC 12. Команда: /roll 1d20+2». Используй модификатор цели, а при отсутствии известного модификатора объяви +0. При нескольких целях запрашивай броски по очереди. Дождись каждой реплики [[БРОСОК]] и запомни, кто спасся.
-• После спасбросков попроси один /roll 2d6 на урон. Этот бросок не сравнивай с DC. При провале спасброска цель получает весь выпавший урон, при успехе — половину с округлением вниз. Затем опиши результат и отметь, что применение потрачено. Бросок атаки героя здесь не нужен.
-• Если существ в зоне нет, спасбросок цели не требуется. Если применение уже потрачено, сообщи об этом до бросков.
-
 ════════ НАВЫКИ ПО ПРЕДЫСТОРИИ ════════
 Солдат: Атлетика, Запугивание; кости, повозки.
 Преступник: Обман, Скрытность; воровские, карты.
@@ -411,174 +348,22 @@ SYSTEM_PROMPT = """
 Наёмник: Атлетика, Запугивание; кости, транспорт.
 Шарлатан: Обман, Ловкость рук; грим, документ.
 Прислужник: Проницательность, Религия; книги, 1 язык.
-
-════════ БОНУС НАВЫКА ════════
-Бонус = мод характеристики + бонус мастерства (+2 на 1–4 ур., +3 на 5–8, +4 на 9–12, +5 на 13–16, +6 на 17–20).
-Характеристика: Сила — Атлетика/Запугивание; Лов — Акробатика/Ловкость рук/Скрытность;
-Инт — История/Магия/Расследование/Природа/Религия; Мудр — Внимательность/Проницательность/Медицина/Выживание/Животные; Хар — Обман/Убеждение/Выступление.
-
-════════ ПРОВЕРКИ И СЛОЖНОСТЬ (DC) ════════
-
-Сначала определи, нужен ли бросок для текущего действия. Если успех не гарантирован и провал меняет ситуацию, запроси проверку до описания результата. Владение навыком, помощь и подготовка улучшают шансы, но сами по себе не отменяют проверку при риске.
-
-• Проверка навыка: прокрасться мимо дозора, взломать замок под угрозой обнаружения, заметить скрытую ловушку, убедить сопротивляющегося NPC, преодолеть опасное препятствие.
-• Бросок атаки: разрешай атаку по сопротивляющейся цели против её защиты. Если способность вместо атаки требует спасбросок или особый бросок, применяй правило способности.
-• Спасбросок: запроси его у того, кому угрожает эффект, если от броска зависят урон или последствия. Если угроза направлена на NPC, укажи, за кого бросать.
-• Без броска: открыть незапертую дверь, поговорить с готовым помочь NPC или осмотреть предмет на виду. Если действие невозможно, кратко объясни препятствие.
-
-ШАГ 1. ШКАЛА:
-• DC 5 — очень легко; DC 8 — легко; DC 10 — просто; DC 12 — ниже среднего;
-• DC 15 — средняя; DC 18 — выше среднего; DC 20 — сложно;
-• DC 25 — очень сложно; DC 30 — почти невозможно.
-
-ШАГ 2. ПОДГОНИ ПОД ПЕРСОНАЖА: характеристика 16+ и навык — снизь DC на 2–3.
-
-ШАГ 3. ДОБАВЬ СИТУАЦИЮ:
-ПОЛОЖЕНИЕ ТЕЛА: лежит +3 (ближняя), +5 (подъём); плавает/висит +3; схвачен +5; обездвижен — автопровал.
-УКРЫТИЕ (для цели, по которой бьют): половинное +2, 3/4 +5, полное — невозможно.
-РУКИ: обе заняты +2 на действия со свободной рукой.
-СОСТОЯНИЕ: темнота +3, слепота +5, ранение +2, крит. +3, отравлен +2, испуган +2, спешка +2, местность +1..+2.
-ПОМОЩЬ: союзник −2, подготовка −2..−3, знакомое −1..−2.
-
-СВЯЗАННЫЕ ДЕЙСТВИЯ:
-• «Лежит, хочет атаковать» — сначала подъём DC 10, потом атака.
-• «Обездвижен» — Сила DC 15.
-• «Связан» — Ловкость рук DC 15 или Сила DC 20.
-
-КАК ОБЪЯВЛЯТЬ:
-Укажи, кто бросает, название проверки, DC (или защиту цели), суммарный модификатор и точную команду. Пример: «Скрытность, DC 13. Команда: /roll 1d20+4». Бонус навыка из листа уже учитывает характеристику и мастерство, поэтому используй его один раз. При нулевом модификаторе команда /roll 1d20.
-
-Пока игрок не прислал [[БРОСОК]], остановись на запросе броска. Не объявляй исход, урон или XP за ещё не разрешённое действие. Запрашивай один бросок за раз и используй присланный результат для объявленной проверки. Для проверки сравни итог с объявленным DC: итог ≥ DC — успех, ниже — провал. Если это бросок урона, применяй правило урона.
-
-════════ СТРУКТУРА ОТВЕТА ════════
-1. НЕМЕДЛЕННЫЙ РЕЗУЛЬТАТ (что произошло), если действие уже разрешено.
-2. РЕАКЦИЯ МИРА (что изменилось).
-3. ГОЛОС NPC (если рядом кто-то есть).
-4. ВЫЗОВ (новая ситуация, требование броска).
-
-Если нужен бросок, закончи на запросе проверки. В остальных случаях оставь игроку возможность действовать дальше.
-При наличии награды укажи XP отдельной строкой в конце.
-
-════════ NPC ════════
-У значимого NPC: имя, роль, яркая деталь, цель, тайна, манера речи.
-Помнят поступки, могут лгать, не выкладывают всё сразу.
-
-════════ КАНОН ════════
-Запоминай всё: имя/расу/класс/предысторию, характеристики, инвентарь, заметки, квесты, позицию, NPC, места.
-
-════════ ЯЗЫК ════════
-Русский, естественный. Жёсткость — по жанру.
-
-════════ СТАРТ ════════
-Первый ответ — после описания персонажа/мира. Сначала раса/класс/предыстория, потом сцена.
 """
 
 
 STATE_EXTRACT_PROMPT = """
-Ты — модуль отслеживания состояния персонажа в RPG. Обнови состояние по диалогу.
-
-Верни СТРОГО валидный JSON без markdown:
-{
-  "name": "имя или Пустой",
-  "race": "", "class": "", "background": "",
-  "level": 1, "xp": 0, "xp_next": 100,
-  "hp": 10, "max_hp": 10, "gold": 0,
-  "stats": {"str":10,"dex":10,"con":10,"int":10,"wis":10,"cha":10},
-  "proficiencies": [], "skills": [], "abilities": [],
-  "inventory": [], "notes": [], "quests": [], "conditions": [],
-  "relationships": [], "faction_clocks": [],
-  "dc_modifier": 0, "dc_modifier_reasons": [],
-  "position": "стоит", "cover": "нет",
-  "weapon_in_hand": "", "restrained": false,
-  "level_history": [], "xp_event_ids": []
-}
-
-XP, LEVEL, XP_NEXT, LEVEL_PENDING — НЕ ИЗМЕНЯЙ самостоятельно. Сохрани значения из текущего состояния.
-XP начисляется сервером только из новых реплик мастера с явным форматом «+N XP».
-Не рассчитывай награды и не повышай уровень; сервер обработает это отдельно.
-
-⚠️ INVENTORY vs NOTES:
-- inventory — ТОЛЬКО физические предметы: оружие, броня, зелья, еда, инструменты, монеты, украшения, ключи.
-- notes — всё, что МОЖНО ПРОЧИТАТЬ: письма, документы, заметки, дневники, уведомления, слухи, грамоты, карты (как информация).
-- Если мастер пишет «ты находишь письмо», «находишь дневник», «тебе вручают грамоту», «системное уведомление», «слышишь слух» — это в notes, НЕ в inventory.
-- Ключ от сундука — inventory. Записка с кодом — notes.
-
-СТРУКТУРА NOTES:
-Массив объектов:
-{
-  "id": "n1",
-  "type": "note|letter|document|notification|rumor|journal",
-  "title": "Краткое название (до 40 символов)",
-  "content": "Полный текст или суть (1–4 предложения)",
-  "source": "Кто/откуда (имя NPC, место)",
-  "date": "Игровая дата или 'недавно'",
-  "unread": true
-}
-- type: note (своя заметка), letter (письмо), document (документ), notification (системное), rumor (слух), journal (дневник/журнал).
-- unread: true для новых, false если игрок прочитал.
-- Не дублируй. Если заметка уже есть — не добавляй повторно.
-- Максимум 30 заметок. Старые прочитанные можно удалять (оставляй важные).
-
-ОСНОВНЫЕ ПОЛЯ:
-- Не выдумывай событий.
-- HP не превышает max_hp.
-- Инвентарь — без дублей.
-
-RACE, CLASS, BACKGROUND: сохрани, если уже есть. Меняй только при событии в игре.
-
-STATS: если раса/класс только появились и все 10 — выставь по классу + расовые бонусы. Если уже не 10 — не пересчитывай.
-
-PROFICIENCIES: массив строк. Формируется ОДИН РАЗ. Максимум 12.
-
-SKILLS: массив {"name":"Скрытность","bonus":5,"source":"Плут"}. ОДИН РАЗ, 6–8 навыков.
-
-ABILITIES: массив {"name":"Ярость","description":"...","uses_max":2,"uses_left":2,"recharge":"long_rest"}.
-recharge: passive (uses_max=0), short_rest, long_rest, day.
-uses_left уменьшай при использовании, восстанавливай при отдыхе. Для Дыхания дракона уменьши uses_left один раз, когда мастер описал применение и его результат. Пока мастер ждёт спасбросок или урон, сохраняй число применений.
-Назначай ОДИН РАЗ, 5–6 умений.
-
-DC_MODIFIER: только реальные причины. Нейтрально → 0, [].
-
-POSITION: "стоит", "сидит", "на коленях", "лежит", "верхом", "плавает", "висит", "схвачен", "обездвижен".
-COVER: "нет", "половинное", "три_четверти", "полное".
-WEAPON_IN_HAND: "", "кинжал", "меч", "лук", "посох", "щит", "обе_руки_заняты".
-RESTRAINED: bool.
-
-QUESTS: массив объектов с полями id/name/type/status/chain/chain_order/stages/current_stage/rewards/giver/location.
-- Все stages done → status "completed", XP выдаётся в этом же ходу.
-- Если chain и completed → сразу создай следующий квест (chain_order + 1).
-- Не продлевай завершённый. Новый этап = новый квест.
-- Максимум 8 активных.
-
-LEVEL_HISTORY: массив {"level":2,"hp":"+4","stats":"+1 Сила","abilities":"+Рывок"}.
-
-ПРОКАЧКА:
-- xp >= xp_next → level+1, max_hp += 2+мод Тел, hp=max_hp, stats: одна хар +1, abilities: новое умение, skills: пересчёт при 5/9/13/17, xp_next: см. прогрессию.
-- В level_history — запись.
-- Max 1 уровень за ход.
-
-RELATIONSHIPS: {"name":"Торвин","attitude":"насторожен","note":"помог"}. Максимум 6–8.
-
-FACTION_CLOCKS: {"name":"Культ","progress":3,"max":6,"goal":"..."}. 1–4 силы.
+Обнови лист RPG по последнему ходу. Верни строго JSON только изменённых полей, {} при отсутствии изменений.
+Недавний диалог — контекст. Не списывай повторно уже учтённый урон, предметы или применения. Не выдумывай событий. xp, xp_next, level, level_pending, xp_event_ids считает сервер.
+Имя, раса, класс и предыстория меняются только по событию. Поля: name, race, class, background, hp, max_hp, gold, stats {str,dex,con,int,wis,cha}. HP не выше max_hp. Базовые характеристики, владения, навыки и умения назначай при создании. Навык {name,bonus,source}; умение {name,description,uses_max,uses_left,recharge}, recharge: passive, short_rest, long_rest или day. Трать применения по событию и восстанавливай по отдыху. Для Дыхания дракона спиши одно применение после разрешения урона, а не пока мастер ждёт бросок.
+Изменённую запись коллекции возвращай целиком с прежним id или именем. inventory — физические вещи, notes — документы, письма, слухи и записи. Заметка {id,type,title,content,source,date,unread}; type: note, letter, document, notification, rumor или journal.
+Квест {id,name,type,status,chain,chain_order,stages,current_stage,rewards,giver,location}; stages — объекты {text,done}. Закрой квест, если все этапы выполнены. Активируй продолжение цепочки, когда оно появилось. Не меняй завершённый квест.
+Временные поля по сцене: conditions, position, cover, weapon_in_hand, restrained, dc_modifier, dc_modifier_reasons. Если условия прошли, верни пустой список; при отсутствии помех — 0 и []. Связи {name,attitude,note}; faction_clocks {name,progress,max,goal}. При обучении или событии в мире обновляй skills и abilities даже после создания героя.
+Повышение передавай отдельным полем level_upgrade только когда игрок явно выбрал улучшения и мастер подтвердил их в последнем ответе строкой «Повышение до уровня N:». Формат: {"level_upgrade":{"level":2,"stat":"str","ability":{"name":"Рывок","description":"...","uses_max":1,"uses_left":1,"recharge":"short_rest"},"skills":[{"name":"Атлетика","bonus":4,"source":"Воин"}]}}. Используй next_upgrade_level из листа. skills включай, если выбран или улучшен навык. Не дублируй бонусы повышения в других полях JSON. level_history записывает сервер.
 """
 
 
 SUMMARY_PROMPT = """
-Ты — архивариус. Сожми фрагмент диалога в краткое резюме.
-
-СОХРАНИ:
-- Ключевые события, имена NPC, отношение к игроку
-- Решения и последствия
-- Открытые вопросы, цели, долги
-- Факты мира
-- Расу, класс, предысторию, характеристики
-- Текущий XP, уровень, активные квесты и их этапы
-- Активные заметки (письма, документы — их суть)
-- Текущее положение
-
-НЕ ВКЛЮЧАЙ: дословные реплики, эмоции, повторы.
-
-Формат: 1 плотный абзац, 4–6 предложений.
+Обнови краткую память кампании по прежнему резюме и новым событиям. Сохрани имена и связи NPC, принятые решения, обещания, долги, открытые квесты, важные предметы и зацепки. Укажи последнее место и открытую угрозу. Замени устаревшее, объедини дубли. Не сочиняй нового. До 10 коротких пунктов, без пересказа реплик, описаний внешности, бросков и текущих чисел листа.
 """
 
 DICE_RE = re.compile(r"^\s*(\d*)d(\d+)([+-]\d+)?\s*$", re.IGNORECASE)
@@ -606,8 +391,12 @@ STATE_NOTE = ("[АКТУАЛЬНОЕ СОСТОЯНИЕ ПЕРСОНАЖА — �
               "не меняй числа без игрового события]\n")
 
 
-MAX_MESSAGES_BEFORE_SUMMARY = 24
-KEEP_RECENT = 10
+KEEP_RECENT = 6
+SUMMARY_BATCH_MESSAGES = 4
+SUMMARY_MAX_BATCH_MESSAGES = 32
+RECENT_HISTORY_CHARS = 3200
+SUMMARY_INPUT_CHARS = 3200
+STATE_HISTORY_CHARS = 1800
 SUMMARY_MAX_SESSIONS = int(os.getenv("SUMMARY_MAX_SESSIONS", "128"))
 
 # Резюме прошлого живёт на сервере, по session_id. Клиент его не хранит
@@ -629,11 +418,39 @@ def _summary_put(sid, text, folded):
         _SUMMARY_STATE[sid] = {"text": text, "folded": folded}
 
 
+def _budgeted_dialogue(messages, max_chars, preserve_latest=False):
+    """Сохраняет формат и порядок реплик, сокращая самые длинные фрагменты."""
+    if not messages:
+        return []
+    recent = messages[-1:] if preserve_latest else []
+    earlier = messages[:-1] if recent else messages
+    available = max(0, max_chars - sum(len(m.get("content", "")) for m in recent))
+    if available < len(earlier) * 40:
+        keep = available // 40
+        earlier = earlier[-keep:] if keep else []
+    ordered = sorted(range(len(earlier)), key=lambda index: len(earlier[index].get("content", "")))
+    limits = [0] * len(earlier)
+    for position, index in enumerate(ordered):
+        limit = min(len(earlier[index].get("content", "")), available // (len(ordered) - position))
+        limits[index] = limit
+        available -= limit
+    clipped = []
+    for message, limit in zip(earlier, limits):
+        content = message.get("content", "")
+        if len(content) > limit:
+            excerpt_chars = limit - len(" […] ")
+            head = excerpt_chars * 2 // 3
+            tail = excerpt_chars - head
+            content = content[:head] + " […] " + content[-tail:]
+        clipped.append({**message, "content": content})
+    return clipped + recent
+
+
 def summarize_old_messages(messages, session_id="", turn_id=None):
     """Сворачивает старую часть диалога в одно резюме.
 
     Резюме хранится по session_id и обновляется инкрементально: за ход
-    досжимается только прирост, вышедший за окно KEEP_RECENT. Без session_id
+    досжимаются пачки реплик, вышедших за окно KEEP_RECENT. Без session_id
     резюме не запоминается между запросами.
     """
     if not isinstance(messages, list):
@@ -656,21 +473,18 @@ def summarize_old_messages(messages, session_id="", turn_id=None):
     summary_text = st["text"]
     folded = min(max(0, int(st["folded"])), len(dialogue))
 
-    # Пока история короткая — ничего не сжимаем.
-    if len(dialogue) <= MAX_MESSAGES_BEFORE_SUMMARY:
-        return pack(summary_text, dialogue[folded:])
-
-    target = len(dialogue) - KEEP_RECENT
+    target = min(len(dialogue) - KEEP_RECENT, folded + SUMMARY_MAX_BATCH_MESSAGES)
     tail = dialogue[folded:]
-    if target <= folded:
-        return pack(summary_text, tail)
+    if target - folded < SUMMARY_BATCH_MESSAGES:
+        return pack(summary_text, _budgeted_dialogue(tail, RECENT_HISTORY_CHARS, preserve_latest=True))
 
-    new_part = dialogue[folded:target]
+    new_part = _budgeted_dialogue(dialogue[folded:target], SUMMARY_INPUT_CHARS)
     text_to_summarize = "\n".join(f"{m['role']}: {m.get('content', '')}"
                                   for m in new_part if m.get("content"))
     if not text_to_summarize.strip():
-        return pack(summary_text, tail)
+        return pack(summary_text, _budgeted_dialogue(tail, RECENT_HISTORY_CHARS, preserve_latest=True))
 
+    summary_options = _qwen_service_options(SUMMARY_MODEL, QWEN_SUMMARY_LIMIT)
     archive_input = ((summary_text + "\n\nНОВЫЕ СОБЫТИЯ:\n") if summary_text
                      else "") + text_to_summarize
     try:
@@ -684,20 +498,23 @@ def summarize_old_messages(messages, session_id="", turn_id=None):
                            f"Материал для обновления памяти:\n{archive_input}\n\n"
                            "Обнови резюме, сохранив старые важные факты и добавив новые."}],
                 temperature=0.2,
+                **summary_options,
             )
-        new_summary = (resp.choices[0].message.content or "").strip()
+        summary_choice = resp.choices[0]
+        if getattr(summary_choice, "finish_reason", None) == "length":
+            raise ValueError("резюме обрезано по лимиту")
+        new_summary = (summary_choice.message.content or "").strip()
         if not new_summary:
             raise RuntimeError("пустое резюме")
     except Exception:
         # Сжать не вышло. Отдаём что есть: прежнее резюме плюс несвёрнутый хвост.
         # Если резюме ещё нет — режем историю по окну, чтобы не переполнить контекст.
-        if summary_text:
-            return pack(summary_text, tail)
-        return pack("", dialogue[-KEEP_RECENT:])
+        fallback_tail = tail if summary_text else dialogue[-KEEP_RECENT:]
+        return pack(summary_text, _budgeted_dialogue(fallback_tail, RECENT_HISTORY_CHARS, preserve_latest=True))
 
     if persist:
         _summary_put(session_id, new_summary, target)
-    return pack(new_summary, dialogue[target:])
+    return pack(new_summary, _budgeted_dialogue(dialogue[target:], RECENT_HISTORY_CHARS, preserve_latest=True))
 
 
 def roll_dice(expr):
@@ -785,6 +602,7 @@ def xp_threshold_for_level(level):
 
 
 XP_EVENT_RE = re.compile(r"\+\s*(\d+)\s*XP\b", re.IGNORECASE)
+LEVEL_UPGRADE_RE = re.compile(r"^(?:\*\*)?Повышение до уровня[ \t]+(\d{1,2})(?:\*\*)?:", re.IGNORECASE | re.MULTILINE)
 
 
 def message_event_id(message, index):
@@ -792,10 +610,79 @@ def message_event_id(message, index):
     return hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()
 
 
+def _next_upgrade_level(state):
+    pending = int(state.get("level_pending", 0) or 0)
+    level = max(1, int(state.get("level", 1) or 1))
+    if pending <= 0 or level <= 1:
+        return None
+    history = state.get("level_history")
+    history = history if isinstance(history, list) else []
+    applied = {record["level"] for record in history
+               if isinstance(record, dict) and isinstance(record.get("level"), int)}
+    return next((number for number in range(max(2, level - pending + 1), level + 1)
+                 if number not in applied), None)
+
+
+def _update_named_entry(entries, change):
+    name = change["name"].strip()
+    for index, entry in enumerate(entries):
+        if isinstance(entry, dict) and str(entry.get("name", "")).strip().casefold() == name.casefold():
+            entries[index] = {**entry, **change, "name": name}
+            return
+    entries.append({**change, "name": name})
+
+
+def _apply_level_upgrade(state, upgrade, next_level):
+    if next_level is None or not isinstance(upgrade, dict) or upgrade.get("level") != next_level:
+        return False
+
+    stat = upgrade.get("stat")
+    ability = upgrade.get("ability")
+    if not isinstance(stat, str) or stat not in DEFAULT_STATE["stats"] or not isinstance(ability, dict):
+        return False
+    if not isinstance(ability.get("name"), str) or not ability["name"].strip():
+        return False
+    if not isinstance(ability.get("description"), str) or not ability["description"].strip():
+        return False
+
+    history = state.get("level_history")
+    history = list(history) if isinstance(history, list) else []
+    if any(isinstance(entry, dict) and entry.get("level") == next_level for entry in history):
+        return False
+
+    abilities = state.get("abilities")
+    abilities = list(abilities) if isinstance(abilities, list) else []
+    _update_named_entry(abilities, ability)
+    state["abilities"] = abilities
+
+    skills = state.get("skills")
+    skills = list(skills) if isinstance(skills, list) else []
+    skill_changes = upgrade.get("skills")
+    if isinstance(skill_changes, list):
+        for skill in skill_changes:
+            if (isinstance(skill, dict) and isinstance(skill.get("name"), str)
+                    and skill["name"].strip() and isinstance(skill.get("bonus"), int)):
+                _update_named_entry(skills, skill)
+    state["skills"] = skills
+
+    existing_stats = state.get("stats")
+    stats = dict(existing_stats) if isinstance(existing_stats, dict) else dict(DEFAULT_STATE["stats"])
+    stats[stat] = int(stats.get(stat, 10)) + 1
+    state["stats"] = stats
+    hp_gain = max(1, 2 + (int(stats.get("con", 10)) - 10) // 2)
+    state["max_hp"] = max(1, int(state.get("max_hp", 1) or 1)) + hp_gain
+    state["hp"] = state["max_hp"]
+    history.append({"level": next_level, "hp": f"+{hp_gain}", "stats": f"+1 {stat}",
+                    "abilities": ability["name"].strip()})
+    state["level_history"] = history
+    return True
+
+
 def extract_state(messages, current_state, turn_id=None):
     current = dict(DEFAULT_STATE)
     if isinstance(current_state, dict):
         current.update(current_state)
+    next_upgrade_level = _next_upgrade_level(current)
     current.setdefault("xp_event_ids", [])
     if not isinstance(current.get("xp_event_ids"), list):
         current["xp_event_ids"] = []
@@ -807,23 +694,47 @@ def extract_state(messages, current_state, turn_id=None):
             if m.get("role") == "assistant" and XP_EVENT_RE.search(m.get("content", "")) and index != (len(messages) - 1):
                 current["xp_event_ids"].append(message_event_id(m, index))
 
-    fresh_events = []
-    for index, m in enumerate(messages):
-        if m.get("role") != "assistant":
+    known_events = {event for event in current["xp_event_ids"] if isinstance(event, str)}
+    awarded_messages = []
+    for index, message in enumerate(messages):
+        if message.get("role") != "assistant":
             continue
-        content = m.get("content", "")
-        event_id = message_event_id(m, index)
-        if event_id in current["xp_event_ids"]:
-            continue
-        matches = [int(x) for x in XP_EVENT_RE.findall(content)]
+        matches = XP_EVENT_RE.findall(message.get("content", ""))
         if matches:
-            fresh_events.append((event_id, sum(matches)))
+            awarded_messages.append((message_event_id(message, index), sum(map(int, matches))))
 
-    recent = messages[-8:]
+    if len(known_events) >= 500:
+        first_known = next((i for i, (event_id, _) in enumerate(awarded_messages)
+                            if event_id in known_events), 0)
+        known_events.update(event_id for event_id, _ in awarded_messages[:first_known])
+
+    fresh_events = [(event_id, amount) for event_id, amount in awarded_messages
+                    if event_id not in known_events]
+
+    recent = _budgeted_dialogue(messages[-4:], STATE_HISTORY_CHARS, preserve_latest=True)
     dialogue = "\n".join(f"{m['role']}: {m['content']}" for m in recent if m.get("content"))
-    prompt = (f"ТЕКУЩЕЕ СОСТОЯНИЕ:\n{json.dumps(current, ensure_ascii=False)}\n\n"
-              f"ДИАЛОГ:\n{dialogue}\n\nВерни обновлённое состояние JSON."
-              " Не меняй XP, уровень и xp_next; XP рассчитывается отдельно сервером.")
+    model_state = {key: value for key, value in current.items() if key not in {"xp_event_ids", "level_history"}}
+    if next_upgrade_level is not None:
+        model_state["next_upgrade_level"] = next_upgrade_level
+    if isinstance(current.get("quests"), list):
+        model_state["quests"] = [
+            {key: quest[key] for key in ("id", "name", "status") if key in quest}
+            if isinstance(quest, dict) and quest.get("status") in {"completed", "failed"} else quest
+            for quest in current["quests"]
+        ]
+    if isinstance(current.get("notes"), list):
+        # Полные тексты остаются в листе. Имена и ID помогают избежать дублей.
+        model_state["notes"] = [
+            {key: note[key] for key in ("id", "type", "title") if key in note}
+            if isinstance(note, dict) else note
+            for note in current["notes"]
+        ]
+    prompt = (f"ТЕКУЩЕЕ СОСТОЯНИЕ:\n{json.dumps(model_state, ensure_ascii=False)}\n\n"
+              f"ДИАЛОГ:\n{dialogue}\n\nВерни JSON только с изменёнными полями.")
+    new_character = (current.get("character_setup_pending")
+                     or not (current.get("race") and current.get("class")))
+    state_limit = QWEN_STATE_SETUP_LIMIT if new_character or next_upgrade_level is not None else QWEN_STATE_LIMIT
+    state_options = _qwen_service_options(EXTRACT_MODEL, state_limit)
     try:
         with llm_slot() as ok:
             if not ok:
@@ -833,19 +744,30 @@ def extract_state(messages, current_state, turn_id=None):
                 messages=[{"role": "system", "content": STATE_EXTRACT_PROMPT},
                          {"role": "user", "content": prompt}],
                 temperature=0.1,
+                **state_options,
             )
-        new_state = clean_json(resp.choices[0].message.content or "")
+        state_choice = resp.choices[0]
+        if getattr(state_choice, "finish_reason", None) == "length":
+            raise ValueError("обновление листа обрезано по лимиту")
+        new_state = clean_json(state_choice.message.content or "")
     except Exception as exc:
         app.logger.warning("Извлечение состояния не удалось: %s", _short_error(exc))
         new_state = {}
 
     merged = dict(current)
     for k, v in new_state.items():
-        if v is not None:
+        if v is not None and k not in {"level_upgrade", "level_history"}:
             merged[k] = v
+    if isinstance(current.get("stats"), dict) and isinstance(new_state.get("stats"), dict):
+        merged["stats"] = {**current["stats"], **new_state["stats"]}
     # Preserve arrays when the model accidentally returns empty/missing arrays.
     for f in ("inventory", "notes", "quests", "conditions", "relationships", "faction_clocks",
-              "dc_modifier_reasons", "proficiencies", "skills", "abilities", "level_history"):
+              "dc_modifier_reasons", "proficiencies", "skills", "abilities"):
+        if f not in new_state:
+            continue
+        if f in ("conditions", "dc_modifier_reasons") and isinstance(new_state[f], list):
+            merged[f] = new_state[f]
+            continue
         old = current.get(f, [])
         new_items = merged.get(f, [])
         if not isinstance(old, list): old = []
@@ -859,17 +781,25 @@ def extract_state(messages, current_state, turn_id=None):
                 if isinstance(item, dict):
                     return item.get("id") or item.get("name") or item.get("title") or json.dumps(item, sort_keys=True, ensure_ascii=False)
                 return str(item)
-            seen = {ident(x) for x in new_items}
-            merged[f] = list(new_items) + [x for x in old if ident(x) not in seen]
+            old_by_id = {ident(item): item for item in old}
+            seen = {ident(item) for item in new_items}
+            if f in ("notes", "quests", "skills", "abilities"):
+                updated_items = []
+                for item in new_items:
+                    previous = old_by_id.get(ident(item))
+                    if isinstance(item, dict) and isinstance(previous, dict):
+                        item = {**previous, **item}
+                    updated_items.append(item)
+                new_items = updated_items
+            merged[f] = list(new_items) + [item for item in old if ident(item) not in seen]
     # Server-authoritative XP: only explicit new rewards, never double-counted.
     xp = max(0, int(current.get("xp", 0) or 0))
-    processed = list(current.get("xp_event_ids", []))
+    processed = [event for event in current["xp_event_ids"] if isinstance(event, str)]
     for event_id, amount in fresh_events:
-        if event_id not in processed:
-            xp += amount
-            processed.append(event_id)
+        xp += amount
+        processed.append(event_id)
     merged["xp"] = xp
-    merged["xp_event_ids"] = processed[-500:]
+    merged["xp_event_ids"] = processed
     # Protect core scalar values from blank/null model output.
     for f in ("name", "race", "class", "background", "position", "cover", "weapon_in_hand"):
         if not merged.get(f) and current.get(f):
@@ -879,7 +809,12 @@ def extract_state(messages, current_state, turn_id=None):
     derived_level = level_for_xp(merged["xp"])
     merged["level"] = derived_level
     merged["xp_next"] = xp_threshold_for_level(derived_level)
-    merged["level_pending"] = max(0, derived_level - previous_level)
+    confirmation = messages[-1].get("content", "") if messages and messages[-1].get("role") == "assistant" else ""
+    confirmed_levels = {int(level) for level in LEVEL_UPGRADE_RE.findall(confirmation)}
+    applied_upgrade = (next_upgrade_level in confirmed_levels
+                       and _apply_level_upgrade(merged, new_state.get("level_upgrade"), next_upgrade_level))
+    pending = (previous_level - next_upgrade_level + 1) if next_upgrade_level is not None else 0
+    merged["level_pending"] = max(0, pending + max(0, derived_level - previous_level) - int(applied_upgrade))
     merged["gold"] = max(0, int(merged.get("gold", 0) or 0))
     merged["dc_modifier"] = int(merged.get("dc_modifier", 0) or 0)
     for f in ("race", "class", "background", "position", "cover", "weapon_in_hand"):
@@ -942,6 +877,12 @@ def _save_info(name, path):
 def api_health():
     return jsonify({
         "ok": True,
+        "app_revision": APP_REVISION,
+        "qwen_output_limits": {
+            "summary": QWEN_SUMMARY_LIMIT if _is_yandex_qwen(SUMMARY_MODEL) else None,
+            "state": QWEN_STATE_LIMIT if _is_yandex_qwen(EXTRACT_MODEL) else None,
+            "state_setup": QWEN_STATE_SETUP_LIMIT if _is_yandex_qwen(EXTRACT_MODEL) else None,
+        },
         "provider": PROVIDER,
         "model": MODEL,
         "extract_model": EXTRACT_MODEL,
@@ -1019,11 +960,23 @@ def api_chat():
     game_state = data.get("state") or DEFAULT_STATE
     if not isinstance(messages, list) or not messages:
         return jsonify({"error": "empty messages"}), 400
-    if messages[0].get("role") != "system":
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + messages
     if not isinstance(game_state, dict):
         game_state = DEFAULT_STATE
+    if messages[0].get("role") != "system":
+        prompt = SYSTEM_PROMPT
+        if game_state.get("character_setup_pending") or not (game_state.get("race") and game_state.get("class")):
+            prompt += CHARACTER_CREATION_RULES
+        messages = [{"role": "system", "content": prompt}] + messages
     state_context = {key: game_state[key] for key in STATE_FIELDS if key in game_state}
+    next_upgrade_level = _next_upgrade_level(game_state)
+    if next_upgrade_level is not None:
+        state_context["next_upgrade_level"] = next_upgrade_level
+        abilities = game_state.get("abilities")
+        if isinstance(abilities, list):
+            state_context["ability_names"] = [
+                ability["name"] for ability in abilities
+                if isinstance(ability, dict) and isinstance(ability.get("name"), str)
+            ]
     skills = game_state.get("skills")
     if isinstance(skills, list):
         skill_bonuses = {
