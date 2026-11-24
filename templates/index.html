@@ -36,38 +36,23 @@
   }
   .status-row { display: flex; align-items: center; gap: 10px; }
   .status-top { display: flex; align-items: center; gap: 12px; }
-  /* Pure emoji insignia: no image fetches or image-generation services. */
-  .identity-crest {
-    width: 50px; height: 50px; border-radius: 15px;
-    border: 2px solid var(--accent-gold); background: #342a20;
-    flex-shrink: 0; display: flex; align-items: center; justify-content: center;
-    font-size: 27px; cursor: pointer;
+  .identity {
+    flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px;
+    padding-left: 12px; border-left: 3px solid var(--accent-gold);
   }
-  .identity-crest:focus-visible, .creator-option:focus-visible { outline: 2px solid var(--accent-gold); outline-offset: 3px; }
-  .identity-tags { display:flex; flex-wrap:wrap; gap:5px; margin-top:2px; }
-  .identity-tag {
-    display:inline-flex; gap:5px; align-items:center; padding:3px 8px;
-    background:#302820; border:1px solid #554333; border-radius:20px;
-    font-size:11px; color:var(--text-primary); max-width:100%;
+  .identity-name {
+    font-weight: 700; color: var(--accent-gold); font-family: var(--font-serif);
+    font-size: 19px; line-height: 1.2; word-break: break-word;
   }
-  .identity-tag .symbol { font-size:15px; line-height:1.1; }
-  .identity-hero { display:flex; align-items:center; gap:12px; padding:10px;
-    border:1px solid var(--border-subtle); border-radius:12px; background:var(--bg-card); }
-  .identity-hero-crest { font-size:47px; line-height:1.15; }
-  .creator-group { display:flex; flex-direction:column; gap:8px; }
-  .creator-heading { font-size:13px; color:var(--accent-gold); font-weight:700; }
-  .creator-options { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; }
-  .creator-option { display:flex; flex-direction:column; align-items:center; gap:3px;
-    padding:8px 3px; min-height:61px; border:1px solid var(--border-subtle);
-    border-radius:9px; background:var(--bg-card); color:var(--text-primary);
-    cursor:pointer; font:inherit; font-size:11px; overflow-wrap:anywhere; }
-  .creator-option .symbol { font-size:25px; line-height:1.3; }
-  .creator-option.selected { border-color:var(--accent-gold); background:#3d301c; }
-  .creator-preview { display:flex; flex-wrap:wrap; gap:6px; margin-top:4px; }
-  .creator-hint { font-size:12px; color:var(--text-secondary); }
-  .status-info { flex: 1; display: flex; flex-direction: column; gap: 4px; }
-  .status-name { font-weight: 700; color: var(--accent-gold); font-family: var(--font-serif); font-size: 15px; }
-  .status-sub { font-size: 11px; color: var(--text-secondary); margin-top: -2px; }
+  .identity-sub { font-size: 12px; color: var(--text-secondary); }
+  .identity-traits { display: flex; flex-wrap: wrap; gap: 6px; margin: 3px 0 0; padding: 0; list-style: none; }
+  .identity-trait {
+    display: flex; align-items: center; gap: 5px; min-width: 0; max-width: 100%;
+    padding: 3px 8px; border: 1px solid var(--border-subtle); border-radius: 6px;
+    background: var(--bg-card); color: var(--text-primary); font-size: 12px;
+  }
+  .identity-trait-icon { flex-shrink: 0; font-size: 15px; }
+  .identity-trait-name { overflow-wrap: anywhere; }
   .status-chips { display: flex; gap: 6px; flex-wrap: wrap; }
   .status-chip {
     background: var(--bg-card); padding: 2px 8px; border-radius: 6px;
@@ -129,23 +114,6 @@
     font-size: 14px; border-radius: 10px;
   }
   .msg.dice b { color: var(--accent-gold); }
-  .msg.dice .dice-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-secondary); margin-bottom: 5px; }
-  .msg.dice .dice-total { font-size: 21px; font-weight: 700; color: var(--accent-gold); }
-  .msg.dice .dice-details { font-size: 12px; margin-top: 4px; color: #d5bea8; overflow-wrap: anywhere; }
-  .msg.character-sheet {
-    align-self: flex-start; max-width: min(100%, 560px); width: 100%; white-space: normal;
-    background: linear-gradient(135deg, #30271c, #201c19); border: 1px solid #71582c;
-    padding: 14px; color: var(--text-primary);
-  }
-  .character-sheet .sheet-heading { font: bold 17px var(--font-serif); color: var(--accent-gold); margin-bottom: 7px; }
-  .character-sheet .sheet-meta { display: flex; flex-wrap: wrap; gap: 7px; font-size: 12px; color: var(--text-secondary); margin: 8px 0; }
-  .character-sheet .sheet-meta span { padding: 4px 7px; border: 1px solid #554333; border-radius: 7px; }
-  .character-sheet .sheet-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; margin-top: 10px; }
-  .character-sheet .sheet-stat { min-width: 0; border-radius: 8px; background: #1b1917; border: 1px solid #4c3b2a; padding: 8px 4px; text-align: center; }
-  .character-sheet .sheet-stat-name { font-size: 11px; color: var(--text-secondary); }
-  .character-sheet .sheet-stat-value { font-size: 19px; font-weight: 700; }
-  .character-sheet .sheet-stat-mod { color: var(--accent-gold); font-size: 12px; }
-  .character-sheet .sheet-footer { font-size: 12px; color: var(--text-secondary); margin-top: 10px; }
   .msg.dice .dice-emoji {
     display: inline-block; font-size: 20px; vertical-align: middle;
     animation: diceShake 0.35s ease-in-out infinite;
@@ -220,6 +188,44 @@
   .modal-content { background: var(--bg-panel); border: 1px solid var(--border-subtle); border-radius: 14px; padding: 24px; width: 100%; max-width: 460px; max-height: 85vh; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; }
   .modal-content h3 { margin: 0 0 4px; font-size: 18px; font-family: var(--font-serif); color: var(--accent-gold); }
   .modal-content input { width: 100%; background: var(--bg-deep); border: 1px solid var(--border-subtle); color: var(--text-primary); border-radius: 8px; padding: 12px 14px; font-size: 16px; font-family: var(--font-sans); outline: none; }
+  #character-builder {
+    width: min(680px, calc(100% - 24px)); max-height: 92dvh;
+    padding: 0; border: 1px solid var(--border-subtle); border-radius: 16px;
+    background: var(--bg-panel); color: var(--text-primary);
+  }
+  #character-builder::backdrop { background: rgba(0,0,0,0.75); }
+  #character-form { padding: clamp(14px, 4vw, 26px); display: grid; gap: 16px; }
+  .character-heading { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
+  .character-heading h2 { margin: 0; color: var(--accent-gold); font: 700 24px var(--font-serif); }
+  .character-heading p { margin: 6px 0 0; color: var(--text-secondary); font-size: 14px; }
+  .character-heading .icon-btn { flex-shrink: 0; }
+  .character-steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+  .character-steps .btn { min-height: 44px; padding: 6px 2px; font-size: clamp(11px, 3vw, 14px); }
+  .character-steps .btn[aria-current="step"] { border-color: var(--accent-gold); color: var(--accent-gold); }
+  .character-steps .btn:disabled { opacity: 0.55; cursor: default; }
+  #character-step { min-width: 0; }
+  #character-step h3 { margin: 0 0 10px; font: 700 18px var(--font-serif); }
+  .character-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .character-tile {
+    position: relative; min-height: 72px; padding: 8px 4px; display: grid; place-content: center; gap: 3px;
+    overflow-wrap: anywhere;
+  }
+  .character-icon { font-size: 23px; }
+  .character-check { display: none; position: absolute; top: 4px; right: 6px; font-size: 12px; }
+  .character-tile[aria-pressed="true"] .character-check { display: block; }
+  .character-tile[aria-pressed="true"] { border-color: var(--accent-gold); background: #332a19; color: #f4d88b; }
+  .character-tile:hover, #character-builder :focus-visible { outline: 2px solid var(--accent-gold); outline-offset: 2px; }
+  .character-custom, .character-fields { margin-top: 12px; display: grid; gap: 8px; }
+  .character-custom-row { display: flex; gap: 8px; }
+  #character-builder input, #character-builder textarea {
+    width: 100%; min-width: 0; padding: 10px; border-radius: 8px; border: 1px solid var(--border-subtle);
+    background: var(--bg-deep); color: var(--text-primary); font: inherit;
+  }
+  #character-builder textarea { resize: vertical; }
+  .character-summary { margin: 0; color: var(--text-secondary); overflow-wrap: anywhere; }
+  #character-error { margin: 0; color: #ffad9f; font-size: 14px; }
+  #character-error:empty { display: none; }
+  .character-footer { display: flex; justify-content: flex-end; gap: 8px; }
   .save-item { padding: 12px 14px; background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 8px; cursor: pointer; font-size: 14px; }
   .save-item:active { background: #3a342f; }
   .kv { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border-subtle); font-size: 14px; }
@@ -314,6 +320,38 @@
     padding: 3px 8px; font-size: 11px; cursor: pointer;
   }
   .note-action-btn:active { background: var(--bg-deep); }
+  /* Сохранения */
+  .save-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 12px; background: var(--bg-card);
+    border: 1px solid var(--border-subtle); border-radius: 8px;
+  }
+  .save-row .save-col { flex: 1; min-width: 0; }
+  .save-row .save-name {
+    cursor: pointer; font-size: 14px; color: var(--text-primary);
+    word-break: break-all;
+  }
+  .save-row .save-name:hover { color: var(--accent-gold); }
+  .save-row .save-meta { font-size: 11px; color: var(--text-secondary); margin-top: 2px; }
+  .save-row .note-action-btn { flex-shrink: 0; }
+  .save-note {
+    font-size: 12px; color: var(--accent-gold);
+    background: var(--bg-deep); border: 1px solid var(--border-subtle);
+    border-radius: 6px; padding: 6px 10px;
+  }
+  /* Перенос партии */
+  .transfer-area {
+    width: 100%; height: 150px; background: var(--bg-deep);
+    color: var(--text-primary); border: 1px solid var(--border-subtle);
+    border-radius: 8px; padding: 10px; font: 12px monospace;
+    resize: vertical; outline: none;
+  }
+  .transfer-area:focus { border-color: var(--accent-gold); }
+  .transfer-hint { font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
+  .transfer-info { font-size: 11px; color: var(--text-secondary); }
+  .transfer-info.warn { color: #d45a5a; }
+  .transfer-row { display: flex; gap: 6px; }
+  .transfer-row .btn { flex: 1; }
 </style>
 </head>
 <body>
@@ -352,7 +390,6 @@
   <div class="drawer-section">
     <button class="btn" data-action="dice">🎲 Бросок 1d20</button>
     <button class="btn" data-action="dice-custom">🎲 Свой бросок...</button>
-    <button class="btn" data-action="create">🧬 Создать персонажа</button>
     <button class="btn" data-action="sheet">📜 Полный лист</button>
     <button class="btn" data-action="skills">🎯 Умения и навыки</button>
     <button class="btn" data-action="notes">📝 Заметки <span class="drawer-badge" id="drawer-notes-badge" style="display:none">0</span></button>
@@ -371,21 +408,34 @@
   <div class="drawer-section">
     <button class="btn" data-action="save">💾 Сохранить</button>
     <button class="btn" data-action="load">📂 Загрузить</button>
-    <button class="btn" data-action="manage-saves">🗂 Управление сохранениями</button>
+    <button class="btn" data-action="transfer">🔄 Перенос партии</button>
     <button class="btn" data-action="reset">✨ Новая игра</button>
     <button class="btn" data-action="help">❓ Справка</button>
-    <button class="btn" data-action="logout">🔒 Сменить пользователя</button>
   </div>
 </aside>
 
 <div id="modal"><div class="modal-content" id="modal-content"></div></div>
+<dialog id="character-builder" aria-labelledby="character-title">
+  <form id="character-form" novalidate>
+    <div class="character-heading">
+      <div>
+        <h2 id="character-title">Создание персонажа</h2>
+        <p id="character-world"></p>
+      </div>
+      <button type="button" class="icon-btn" id="character-close" aria-label="Закрыть">×</button>
+    </div>
+    <nav class="character-steps" id="character-steps" aria-label="Этапы создания"></nav>
+    <section id="character-step" aria-labelledby="character-step-title"></section>
+    <p id="character-error" role="alert"></p>
+    <div class="character-footer">
+      <button type="button" class="btn" id="character-back">Назад</button>
+      <button type="submit" class="btn primary" id="character-next">Далее</button>
+    </div>
+  </form>
+</dialog>
 
 <script>
-let messages = [], state = null, memory = {}, uiEvents = [], busy = false, rolling = false;
-let authUser = 'owner', authToken = '';
-const AUTH_KEY = 'rpg_session_auth_v2';
-try { sessionStorage.removeItem('rpg_access_v1'); } catch(e) {}
-
+let messages = [], state = null, busy = false;
 const chatEl = document.getElementById('chat');
 const inputEl = document.getElementById('input');
 const sendBtn = document.getElementById('send-btn');
@@ -395,8 +445,47 @@ const modalEl = document.getElementById('modal');
 const modalContent = document.getElementById('modal-content');
 const statusEl = document.getElementById('status');
 
-const LS_KEY = 'rpg_session_v10';
+const LS_KEY = 'rpg_session_v9';
 const TTS_KEY = 'rpg_tts_v1';
+
+/* ═══════════ ИДЕНТИФИКАТОРЫ ═══════════
+   clientId — постоянный для устройства: разделяет сохранения игроков.
+   sessionId — на одну партию: к нему на сервере привязано резюме прошлого.
+   Оба уходят заголовками во все запросы /api/. */
+
+const CLIENT_ID = (() => {
+  let id = localStorage.getItem('rpg_client_id');
+  if (!id) {
+    id = 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    localStorage.setItem('rpg_client_id', id);
+  }
+  return id;
+})();
+
+function newSessionId() {
+  return 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
+let SESSION_ID = localStorage.getItem('rpg_session_id') || newSessionId();
+localStorage.setItem('rpg_session_id', SESSION_ID);
+function resetSession() {
+  SESSION_ID = newSessionId();
+  localStorage.setItem('rpg_session_id', SESSION_ID);
+}
+
+(function () {
+  const orig = window.fetch.bind(window);
+  window.fetch = function (url, opts) {
+    const u = typeof url === 'string' ? url : (url && url.url) || '';
+    if (u.startsWith('/api/')) {
+      opts = Object.assign({}, opts || {});
+      const h = Object.assign({}, opts.headers || {});
+      h['X-Client-Id'] = CLIENT_ID;
+      h['X-Session-Id'] = SESSION_ID;
+      opts.headers = h;
+    }
+    return orig(url, opts);
+  };
+})();
 
 const EMPTY_STATE = {
   name:"Пустой", race:"", class:"", background:"",
@@ -424,20 +513,16 @@ const NOTE_TYPES = {
 const READY_WORLDS = [
   { id: 'forgotten_realms', name: 'Забытые Королевства', desc: 'Классическое D&D. Шахта Фандальвера, гоблины, драконы.', prompt: 'Мир: Забытые Королевства. Начни приключение "Шахта Фандальвера". Я и мои спутники сопровождаем караван дворфа Гундрена Роксвика в город Фандалин. Начинается всё с засады гоблинов на дороге.' },
   { id: 'ravenloft', name: 'Равенлофт (Готик-хоррор)', desc: 'Земля Баровия, вампир Страд, вечный туман и ужас.', prompt: 'Мир: Равенлофт (Баровия). Я и моя группа путников заблудились в тумане и вышли к мрачной земле. Начни с прибытия в Баровию.' },
-  { id: 'eberron', name: 'Эберрон (Стимпанк)', desc: 'Город Шарн, магия и механизмы, нуар и интриги.', prompt: 'Мир: Эберрон. Я — детектив в городе Шарн. Мне поручили расследовать кражу запретных магических технологий. Начни с прибытия на место преступления.' },
-  { id: 'spelljammer', name: 'Спеллджаммер (Космос)', desc: 'Космический галеон, астральное море, пираты.', prompt: 'Мир: Спеллджаммер. Я — капитан космического корабля. Мы перевозим таинственный груз через Астральное море. Начни с обнаружения неизвестного корабля позади.' },
-  { id: 'dark_sun', name: 'Тёмное Солнце (Пустоши)', desc: 'Выжженная пустыня, рабство, выживание, псионика.', prompt: 'Мир: Тёмное Солнце (Атас). Я — беглый раб в пустошах. Впереди — бескрайняя пустыня. Начни с поиска убежища на ночь.' },
-  { id: 'litrpg_apocalypse', name: 'LitRPG: Система', desc: 'Земля после Системы. Монстры, уровни, прокачка.', prompt: 'Мир: LitRPG. Система пришла на Землю. Я — обычный человек с интерфейсом уровня и характеристик. Начни с первой Системы и первого монстра.' }
+  { id: 'eberron', name: 'Эберрон (Стимпанк)', desc: 'Город Шарн, магия и механизмы, нуар и интриги.', prompt: 'Мир: Эберрон. В городе Шарн герою поручают расследовать кражу запретных магических технологий. Начни с прибытия на место преступления.' },
+  { id: 'spelljammer', name: 'Спеллджаммер (Космос)', desc: 'Космический галеон, астральное море, пираты.', prompt: 'Мир: Спеллджаммер. Герой находится на корабле, который перевозит таинственный груз через Астральное море. Начни с обнаружения неизвестного корабля позади.' },
+  { id: 'dark_sun', name: 'Тёмное Солнце (Пустоши)', desc: 'Выжженная пустыня, рабство, выживание, псионика.', prompt: 'Мир: Тёмное Солнце (Атас). Герой пересекает пустоши. Начни с поиска убежища на ночь.' },
+  { id: 'litrpg_apocalypse', name: 'LitRPG: Система', desc: 'Земля после Системы. Монстры, уровни, прокачка.', prompt: 'Мир: LitRPG. Система пришла на Землю и открывает герою доступ к уровням и характеристикам. Начни с активации Системы и появления первого монстра.' }
 ];
 
-// Local campaigns are isolated between authenticated users in the same browser.
-function persist() {
-  try { localStorage.setItem(LS_KEY + '_' + authUser, JSON.stringify({messages, state, memory, ui_events: uiEvents})); } catch(e){}
-}
+function persist() { try { localStorage.setItem(LS_KEY, JSON.stringify({messages, state})); } catch(e){} }
 function restore() {
   try {
-    const r = localStorage.getItem(LS_KEY + '_' + authUser) ||
-              (authUser === 'owner' ? localStorage.getItem('rpg_session_v9') : null);
+    const r = localStorage.getItem(LS_KEY);
     if (!r) return null;
     const d = JSON.parse(r);
     if (d && Array.isArray(d.messages)) return d;
@@ -448,156 +533,192 @@ function esc(s) {
   return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
-/* AUTH: Only the opaque, ASCII-safe session token belongs in HTTP headers.
-   The server resolves the account from the session; names (including Cyrillic)
-   must never be sent via X-RPG-User or another HTTP header. */
-function authHeaders() {
-  return {'Authorization': 'Bearer ' + authToken};
-}
-async function checkAuth(token) {
+const CHARACTER_CUSTOM_KEY = 'rpg_character_options_v1';
+const CHARACTER_CUSTOM_ICON = '✦';
+const CHARACTER_CATEGORIES = [
+  { key: 'class', label: 'Класс', heading: 'Выберите класс', options: [
+    ['⚔️', 'Воин'], ['🪓', 'Варвар'], ['🗡️', 'Плут'], ['🏹', 'Следопыт'],
+    ['📖', 'Маг'], ['🎻', 'Бард'], ['☀️', 'Жрец'], ['🌿', 'Друид'],
+    ['🛡️', 'Паладин'], ['👊', 'Монах'], ['🔥', 'Чародей'], ['🔮', 'Колдун']
+  ] },
+  { key: 'race', label: 'Раса', heading: 'Выберите расу', options: [
+    ['🧑', 'Человек'], ['🍃', 'Эльф'], ['🌗', 'Полуэльф'], ['⛏️', 'Дворф'],
+    ['🍀', 'Полурослик'], ['⚙️', 'Гном'], ['🦷', 'Полуорк'], ['😈', 'Тифлинг'],
+    ['🐉', 'Драконорождённый'], ['👺', 'Гоблин'], ['🦎', 'Кобольд']
+  ] },
+  { key: 'background', label: 'Предыстория', heading: 'Выберите предысторию', options: [
+    ['⚔️', 'Солдат'], ['🔑', 'Преступник'], ['📚', 'Мудрец'], ['🏅', 'Народный герой'],
+    ['👑', 'Благородный'], ['⛰️', 'Отшельник'], ['🎭', 'Артист'], ['🎒', 'Бродяга'],
+    ['⚓', 'Моряк'], ['🪙', 'Наёмник'], ['🎲', 'Шарлатан'], ['🕯️', 'Прислужник']
+  ] }
+];
+const characterDialog = document.getElementById('character-builder');
+
+function readCharacterOptions() {
   try {
-    const response = await fetch('/api/auth/check', {
-      headers: {'Authorization': 'Bearer ' + token},
-      cache: 'no-store'
+    return JSON.parse(localStorage.getItem(CHARACTER_CUSTOM_KEY)) || {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function openCharacterBuilder(world = null) {
+  if (busy || characterDialog.open) return;
+  const form = document.getElementById('character-form');
+  const stepPanel = document.getElementById('character-step');
+  const stepNav = document.getElementById('character-steps');
+  const next = document.getElementById('character-next');
+  const back = document.getElementById('character-back');
+  const error = document.getElementById('character-error');
+  const choices = {};
+  const stored = readCharacterOptions();
+  const customOptions = Object.fromEntries(CHARACTER_CATEGORIES.map(({key}) =>
+    [key, Array.isArray(stored[key]) ? stored[key].filter(v => typeof v === 'string' && v.trim()) : []]
+  ));
+  const stepLabels = [...CHARACTER_CATEGORIES.map(({label}) => label), 'Старт'];
+  let step = 0;
+  let name = '';
+  let scene = '';
+
+  document.getElementById('character-world').textContent =
+    world ? world.name + ' · ' + world.desc : 'Соберите героя для новой игры.';
+
+  function selectOption(category, value) {
+    choices[category.key] = value;
+    error.textContent = '';
+    stepPanel.querySelectorAll('[data-character-option]').forEach(button => {
+      button.setAttribute('aria-pressed', String(button.dataset.characterOption === value));
     });
-    if (!response.ok) return null;
-    const data = await response.json();
-    return data.user || null;
-  } catch (e) { return null; }
-}
-async function showLogin() {
-  let config = {registration_enabled: true, invite_required: false};
-  try {
-    const r = await fetch('/api/auth/config', {cache: 'no-store'});
-    if (r.ok) config = await r.json();
-  } catch (e) { /* Server/network failure will surface on submission. */ }
-  const registrationTab = config.registration_enabled
-    ? '<button class="btn" id="auth-register-mode" type="button">Зарегистрироваться</button>'
-    : '';
-  const inviteField = config.invite_required
-    ? `<div id="invite-group" style="display:none"><label for="auth-invite">Код приглашения</label>
-       <input id="auth-invite" type="password" autocomplete="off" maxlength="128"></div>`
-    : '';
-  modalContent.innerHTML = `<h3>🎲 RPG-мастер</h3>
-    <p style="color:var(--text-secondary)">Войдите в свой аккаунт или создайте новый. У каждого игрока будут свои сохранения.</p>
-    <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <button class="btn primary" id="auth-login-mode" type="button">Войти</button>
-      ${registrationTab}
-    </div>
-    <label for="auth-username">Логин</label>
-    <input id="auth-username" type="text" autocomplete="username" placeholder="Например, ivan" maxlength="32">
-    <label for="auth-password">Пароль</label>
-    <input id="auth-password" type="password" autocomplete="current-password" maxlength="128">
-    <div id="auth-confirm-group" style="display:none">
-      <label for="auth-confirm">Повторите пароль</label>
-      <input id="auth-confirm" type="password" autocomplete="new-password" maxlength="128">
-    </div>
-    ${inviteField}
-    <p id="auth-hint" style="font-size:12px;color:var(--text-secondary)">Для владельца: логин owner и ключ RPG_ACCESS_TOKEN.</p>
-    <div id="auth-error" role="alert" style="color:#e57373;min-height:20px;font-size:13px"></div>
-    <button class="btn primary" id="auth-submit" type="button" style="width:100%">Войти</button>`;
-  modalEl.classList.add('open');
-  return new Promise(resolve => {
-    const userBox = document.getElementById('auth-username');
-    const passBox = document.getElementById('auth-password');
-    const confirmBox = document.getElementById('auth-confirm');
-    const confirmGroup = document.getElementById('auth-confirm-group');
-    const inviteGroup = document.getElementById('invite-group');
-    const hint = document.getElementById('auth-hint');
-    const error = document.getElementById('auth-error');
-    const button = document.getElementById('auth-submit');
-    const loginTab = document.getElementById('auth-login-mode');
-    const registerTab = document.getElementById('auth-register-mode');
-    let mode = 'login';
-    function setMode(next) {
-      mode = next;
-      const isRegister = mode === 'register';
-      confirmGroup.style.display = isRegister ? '' : 'none';
-      if (inviteGroup) inviteGroup.style.display = isRegister ? '' : 'none';
-      passBox.autocomplete = isRegister ? 'new-password' : 'current-password';
-      button.textContent = isRegister ? 'Создать аккаунт' : 'Войти';
-      hint.textContent = isRegister
-        ? 'Логин: 3–32 символа (буквы, цифры, _ или -). Пароль: минимум 8 символов.'
-        : 'Для владельца: логин owner и ключ RPG_ACCESS_TOKEN.';
-      loginTab.classList.toggle('primary', !isRegister);
-      if (registerTab) registerTab.classList.toggle('primary', isRegister);
-      error.textContent = '';
+    stepNav.children[step + 1].disabled = false;
+  }
+
+  function addCustomOption(category, options) {
+    const input = document.getElementById('character-custom-input');
+    const value = input.value.trim();
+    if (!value) {
+      error.textContent = 'Введите название своего варианта.';
+      input.focus();
+      return;
     }
-    loginTab.onclick = () => setMode('login');
-    if (registerTab) registerTab.onclick = () => setMode('register');
-    async function submit() {
-      const username = userBox.value.trim(), password = passBox.value;
-      if (!username || !password) { error.textContent = 'Введите логин и пароль.'; return; }
-      if (mode === 'register' && password !== confirmBox.value) {
-        error.textContent = 'Пароли не совпадают.'; return;
+    const match = options.find(([, label]) => label.toLocaleLowerCase('ru') === value.toLocaleLowerCase('ru'));
+    if (!match) {
+      customOptions[category.key].push(value);
+      try { localStorage.setItem(CHARACTER_CUSTOM_KEY, JSON.stringify(customOptions)); } catch (e) {}
+    }
+    choices[category.key] = match ? match[1] : value;
+    renderStep();
+    stepPanel.querySelector('[aria-pressed="true"]').focus();
+  }
+
+  function renderStep() {
+    const category = CHARACTER_CATEGORIES[step];
+    const firstIncomplete = CHARACTER_CATEGORIES.findIndex(({key}) => !choices[key]);
+    stepNav.innerHTML = stepLabels.map((label, index) =>
+      `<button type="button" class="btn" data-character-step="${index}"
+        ${index === step ? 'aria-current="step"' : ''}
+        ${firstIncomplete !== -1 && index > firstIncomplete ? 'disabled' : ''}>${label}</button>`
+    ).join('');
+    next.textContent = category ? 'Далее' : 'Начать приключение';
+    back.hidden = step === 0;
+    error.textContent = '';
+
+    if (!category) {
+      stepPanel.innerHTML = `<h3 id="character-step-title" tabindex="-1">Герой готов к приключению</h3>
+        <p class="character-summary">${[choices.race, choices.class, choices.background].map(esc).join(' · ')}</p>
+        <div class="character-fields">
+          <label for="character-name">Имя персонажа</label>
+          <input id="character-name" maxlength="60" required value="${esc(name)}">
+          <label for="character-scene">${world ? 'Детали о герое (необязательно)' : 'Мир или завязка (необязательно)'}</label>
+          <textarea id="character-scene" rows="3" maxlength="600">${esc(scene)}</textarea>
+        </div>`;
+      document.getElementById('character-name').oninput = event => {
+        name = event.target.value;
+        error.textContent = '';
+      };
+      document.getElementById('character-scene').oninput = event => { scene = event.target.value; };
+      return;
+    }
+
+    const options = [...category.options, ...customOptions[category.key].map(label => [CHARACTER_CUSTOM_ICON, label])];
+    stepPanel.innerHTML = `<h3 id="character-step-title" tabindex="-1">${category.heading}</h3>
+      <div class="character-grid" role="group" aria-labelledby="character-step-title">
+        ${options.map(([icon, label]) => `<button type="button" class="btn character-tile"
+          data-character-option="${esc(label)}" aria-pressed="${choices[category.key] === label}">
+          <span class="character-icon" aria-hidden="true">${icon}</span><span>${esc(label)}</span>
+          <span class="character-check" aria-hidden="true">✓</span></button>`).join('')}
+      </div>
+      <div class="character-custom">
+        <label for="character-custom-input">Свой вариант</label>
+        <div class="character-custom-row">
+          <input id="character-custom-input" maxlength="120" placeholder="Название">
+          <button type="button" class="btn" id="character-add">Добавить</button>
+        </div>
+      </div>`;
+    stepPanel.querySelectorAll('[data-character-option]').forEach(button => {
+      button.onclick = () => selectOption(category, button.dataset.characterOption);
+    });
+    document.getElementById('character-add').onclick = () => addCustomOption(category, options);
+    document.getElementById('character-custom-input').onkeydown = event => {
+      if (event.key !== 'Enter' || event.isComposing) return;
+      event.preventDefault();
+      addCustomOption(category, options);
+    };
+  }
+
+  function goToStep(index) {
+    step = index;
+    renderStep();
+    const focusTarget = document.getElementById('character-name') || document.getElementById('character-step-title');
+    focusTarget.focus();
+    characterDialog.scrollTop = 0;
+  }
+
+  document.getElementById('character-close').onclick = () => characterDialog.close();
+  stepNav.onclick = event => {
+    const button = event.target.closest('[data-character-step]');
+    if (button && !button.disabled) goToStep(Number(button.dataset.characterStep));
+  };
+  back.onclick = () => goToStep(step - 1);
+  form.onsubmit = event => {
+    event.preventDefault();
+    const category = CHARACTER_CATEGORIES[step];
+    if (category) {
+      if (choices[category.key]) goToStep(step + 1);
+      else {
+        error.textContent = 'Выберите карточку или добавьте свой вариант.';
+        stepPanel.querySelector('.character-tile').focus();
       }
-      button.disabled = true;
-      error.textContent = mode === 'register' ? 'Создаём аккаунт…' : 'Проверяем пароль…';
-      try {
-        const endpoint = mode === 'register' ? '/api/auth/register' : '/api/auth/login';
-        const payload = {username, password};
-        if (inviteGroup) payload.invite_code = document.getElementById('auth-invite').value;
-        const response = await fetch(endpoint, {
-          method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify(payload), cache: 'no-store'
-        });
-        const result = await response.json();
-        if (!response.ok || !result.ok || !result.token) {
-          error.textContent = result.error || 'Не удалось войти. Повторите попытку.';
-          return;
-        }
-        authUser = result.user;
-        authToken = result.token;
-        try { sessionStorage.setItem(AUTH_KEY, JSON.stringify({user: authUser, token: authToken})); } catch(e) {}
-        modalEl.classList.remove('open');
-        resolve(true);
-      } catch(e) {
-        error.textContent = 'Нет соединения с сервером. Попробуйте ещё раз.';
-      } finally { button.disabled = false; }
+      return;
     }
-    button.onclick = submit;
-    [userBox, passBox, confirmBox].forEach(el => {
-      el.onkeydown = e => { if (e.key === 'Enter') submit(); };
-    });
-    userBox.focus();
-  });
-}
-async function ensureAuth() {
-  let saved;
-  try { saved = JSON.parse(sessionStorage.getItem(AUTH_KEY) || 'null'); } catch(e) {}
-  if (saved && saved.user && typeof saved.token === 'string') {
-    const user = await checkAuth(saved.token);
-    if (user) { authUser = user; authToken = saved.token; return true; }
-    try { sessionStorage.removeItem(AUTH_KEY); } catch(e) {}
-  }
-  // Only local unsafe development mode may have no credentials.
-  const unauthenticatedUser = await checkAuth('');
-  if (unauthenticatedUser) { authUser = unauthenticatedUser; authToken = ''; return true; }
-  return showLogin();
-}
-async function logoutAccount() {
-  try {
-    await fetch('/api/auth/logout', {method: 'POST', headers: authHeaders(), cache: 'no-store'});
-  } catch(e) { /* Logging out locally still works without network. */ }
-  try { sessionStorage.removeItem(AUTH_KEY); } catch(e) {}
-  location.reload();
-}
-async function apiFetch(url, options={}) {
-  const makeRequest = () => fetch(url, {
-    ...options, headers: {...(options.headers || {}), ...authHeaders()}, cache: 'no-store'
-  });
-  let response = await makeRequest();
-  if (response.status === 401) {
-    try { sessionStorage.removeItem(AUTH_KEY); } catch(e) {}
-    const previousUser = authUser;
-    await showLogin();
-    if (authUser !== previousUser) {
-      location.reload();
-      throw new Error('Пользователь изменён, страница перезагружается');
+    if (!name.trim()) {
+      error.textContent = 'Введите имя персонажа.';
+      document.getElementById('character-name').focus();
+      return;
     }
-    response = await makeRequest();
-  }
-  return response;
+    if (busy || (messages.length && !confirm('Начать новую игру? Текущая история будет заменена.'))) return;
+    characterDialog.close();
+    startCharacterGame({name: name.trim(), ...choices}, world, scene.trim());
+  };
+  renderStep();
+  characterDialog.showModal();
+  document.getElementById('character-step-title').focus();
+}
+
+function startCharacterGame(character, world, scene) {
+  messages = [];
+  state = {...EMPTY_STATE, ...character, character_setup_pending: true};
+  resetSession();
+  ttsStop();
+  tts.lastText = '';
+  chatEl.innerHTML = '';
+  renderStatus();
+  const prompt = [
+    `Мой персонаж — ${character.name}. Раса: ${character.race}. Класс: ${character.class}. Предыстория: ${character.background}.`,
+    world?.prompt,
+    scene,
+    'Сохрани мой выбор, включая авторские варианты. Подбери стартовые характеристики, навыки и умения, затем начни приключение.'
+  ].filter(Boolean).join('\n\n');
+  sendMessage(prompt);
 }
 
 /* POSITION / COVER */
@@ -621,159 +742,7 @@ const COVER_LABELS = {
 function getPositionInfo(pos) { return POSITION_LABELS[pos] || { icon: '❔', label: pos || '—', mod: 0 }; }
 function getCoverInfo(cov) { return COVER_LABELS[cov] || { icon: '', label: cov || '—', mod: 0 }; }
 
-/* CHARACTER INSIGNIA — lightweight emoji stickers, calculated from saved character fields.
-   Works with both new and pre-existing campaigns, including names entered directly in chat. */
-const CHARACTER_CHOICES = {
-  race: [
-    ['Человек','🧑'], ['Эльф','🧝'], ['Полуэльф','🌿'],
-    ['Дварф','🪓'], ['Гном','🛠️'], ['Полурослик','🍀'],
-    ['Орк','👹'], ['Полуорк','🛡️'], ['Тифлинг','😈'],
-    ['Драконорождённый','🐉'], ['Дроу','🌙'], ['Фея','🧚']
-  ],
-  class: [
-    ['Воин','⚔️'], ['Маг','🧙'], ['Плут','🗡️'],
-    ['Следопыт','🏹'], ['Паладин','🛡️'], ['Варвар','🪓'],
-    ['Жрец','✨'], ['Друид','🌳'], ['Бард','🎵'],
-    ['Колдун','🔮'], ['Чародей','🌟'], ['Монах','🥋']
-  ],
-  background: [
-    ['Преступник','⛓️'], ['Солдат','🎖️'], ['Мудрец','📚'],
-    ['Благородный','👑'], ['Народный герой','🌾'], ['Отшельник','🏕️'],
-    ['Артист','🎭'], ['Бродяга','🎒'], ['Моряк','⚓'],
-    ['Наёмник','💰'], ['Шарлатан','🃏'], ['Прислужник','🕯️']
-  ]
-};
-const CHARACTER_ALIASES = {
-  race: [
-    [/полуэльф|half.?elf/, '🌿'], [/полуорк|half.?orc/, '🛡️'],
-    [/дроу|тёмн.*эльф|dark elf/, '🌙'],
-    [/драконорож|драконид|dragonborn/, '🐉'],
-    [/тифлинг|tiefling/, '😈'], [/орк|orcs?/, '👹'],
-    [/эльф|elf/, '🧝'], [/дварф|дворф|гном.*гор|dwarf/, '🪓'],
-    [/полуросл|халфлинг|хоббит|halfling/, '🍀'],
-    [/гном|gnome/, '🛠️'], [/фе[яи]|fairy/, '🧚'],
-    [/гоблин|goblin/, '👺'], [/нежить|скелет|undead/, '💀'],
-    [/человек|люди|human/, '🧑']
-  ],
-  class: [
-    [/паладин|paladin/, '🛡️'], [/варвар|berserk|barbarian/, '🪓'],
-    [/плут|вор|разбойник|assassin|rogue/, '🗡️'],
-    [/следопыт|рейнджер|ranger|лучник|охотник/, '🏹'],
-    [/колдун|чернокнижник|warlock/, '🔮'],
-    [/чародей|sorcerer/, '🌟'], [/маг|волшебник|чароде[йя]|wizard|mage/, '🧙'],
-    [/жрец|клирик|cleric|священник/, '✨'],
-    [/друид|druid/, '🌳'], [/бард|bard/, '🎵'],
-    [/монах|monk/, '🥋'], [/воин|рыцарь|fighter|knight|боец/, '⚔️']
-  ],
-  background: [
-    [/преступник|вор|бандит|criminal|контрабандист/, '⛓️'],
-    [/солдат|военн|ветеран|soldier/, '🎖️'],
-    [/мудрец|учён|исследователь|sage|учитель/, '📚'],
-    [/благород|аристократ|дворянин|noble/, '👑'],
-    [/народн.*геро|folk hero/, '🌾'], [/отшельник|hermit/, '🏕️'],
-    [/артист|акт[её]р|artist|entertainer/, '🎭'],
-    [/бродяг|беспризор|urchin|странник/, '🎒'],
-    [/моряк|пират|sailor|pirate/, '⚓'],
-    [/на[её]мник|mercenary/, '💰'], [/шарлатан|мошенник|charlatan/, '🃏'],
-    [/прислужник|служитель|acolyte/, '🕯️']
-  ]
-};
-function characterIcon(kind, value) {
-  const text = String(value || '').trim().toLowerCase().replace(/ё/g, 'е');
-  if (!text) return '❔';
-  const choice = (CHARACTER_CHOICES[kind] || []).find(([label]) => label.toLowerCase().replace(/ё/g, 'е') === text);
-  if (choice) return choice[1];
-  const alias = (CHARACTER_ALIASES[kind] || []).find(([pattern]) => pattern.test(text));
-  return alias ? alias[1] : ({race:'🧬', class:'🎯', background:'📜'}[kind] || '❔');
-}
-function identityTag(kind, value, label = '') {
-  if (!value) return '';
-  const icon = characterIcon(kind, value);
-  return `<span class="identity-tag" title="${esc(label || value)}"><span class="symbol" aria-hidden="true">${icon}</span>${esc(value)}</span>`;
-}
-function characterIdentity(st) {
-  return identityTag('race', st.race, 'Раса') + identityTag('class', st.class, 'Класс') + identityTag('background', st.background, 'Предыстория');
-}
-
-/* Creation form is optional: players can still describe any character in free text. */
-function openCharacterCreator(world = null) {
-  if (busy) return;
-  if (messages.length && !confirm('Начать новую игру? Несохранённый прогресс текущего приключения будет потерян.')) return;
-  const picked = {race:'', class:'', background:''};
-  const sections = [
-    ['race', '🧬 Раса'], ['class', '⚔️ Класс'], ['background', '📜 Предыстория']
-  ];
-  modalContent.innerHTML = `
-    <h3>🧬 Создание персонажа${world ? ' · ' + esc(world.name) : ''}</h3>
-    <div class="creator-hint">Выберите три значка. Они появятся в вашем профиле без генерации картинок.</div>
-    <label for="creator-name">Имя персонажа</label>
-    <input id="creator-name" maxlength="60" placeholder="Например, Арден" autocomplete="off">
-    ${sections.map(([key, heading]) => `
-      <div class="creator-group"><div class="creator-heading">${heading}</div>
-        <div class="creator-options" data-options="${key}">
-          ${CHARACTER_CHOICES[key].map(([value, icon]) => `<button type="button" class="creator-option" data-group="${key}" data-value="${esc(value)}" aria-pressed="false"><span class="symbol" aria-hidden="true">${icon}</span><span>${esc(value)}</span></button>`).join('')}
-          <button type="button" class="creator-option" data-group="${key}" data-value="__other__" aria-pressed="false"><span class="symbol" aria-hidden="true">✍️</span><span>Свой вариант</span></button>
-        </div>
-        <input class="creator-custom" id="creator-custom-${key}" maxlength="70" placeholder="Укажите свой вариант" aria-label="Свой вариант: ${heading}" style="display:none">
-      </div>`).join('')}
-    <div class="creator-heading">Ваши значки</div><div class="creator-preview" id="creator-preview"></div>
-    <label for="creator-details">Дополнительно (необязательно)</label>
-    <input id="creator-details" maxlength="350" placeholder="Характер, внешность, цель, особенности мира">
-    <div id="creator-error" class="creator-hint" role="alert"></div>
-    <button type="button" class="btn primary" id="creator-submit">✨ Начать приключение</button>
-    ${world ? '<button type="button" class="btn" id="creator-skip">🎲 Начать без анкеты</button>' : ''}
-    <button type="button" class="btn" id="creator-cancel">Отмена</button>`;
-  modalEl.classList.add('open');
-  const preview = document.getElementById('creator-preview');
-  const error = document.getElementById('creator-error');
-  const valueFor = key => picked[key] === '__other__'
-    ? document.getElementById('creator-custom-' + key).value.trim() : picked[key];
-  function redraw() {
-    preview.innerHTML = sections.map(([key]) => {
-      const val = valueFor(key);
-      return val ? identityTag(key, val) : `<span class="identity-tag"><span class="symbol">❔</span>${({race:'Раса',class:'Класс',background:'Предыстория'})[key]}</span>`;
-    }).join('');
-    error.textContent = '';
-  }
-  modalContent.querySelectorAll('.creator-option').forEach(button => button.onclick = () => {
-    const kind = button.dataset.group;
-    picked[kind] = button.dataset.value;
-    modalContent.querySelectorAll(`[data-group="${kind}"]`).forEach(b => {
-      const selected = b === button;
-      b.classList.toggle('selected', selected);
-      b.setAttribute('aria-pressed', String(selected));
-    });
-    const custom = document.getElementById('creator-custom-' + kind);
-    custom.style.display = picked[kind] === '__other__' ? 'block' : 'none';
-    redraw();
-    if (picked[kind] === '__other__') custom.focus();
-  });
-  modalContent.querySelectorAll('.creator-custom').forEach(i => i.addEventListener('input', redraw));
-  document.getElementById('creator-cancel').onclick = () => modalEl.classList.remove('open');
-  function startGame(description, hero = null) {
-    modalEl.classList.remove('open');
-    messages = []; state = {...EMPTY_STATE, ...(hero || {})}; memory = {}; uiEvents = [];
-    ttsStop(); chatEl.innerHTML = ''; renderStatus(); persist();
-    sendMessage(description, {characterCreated: !!hero});
-  }
-  document.getElementById('creator-submit').onclick = () => {
-    const name = document.getElementById('creator-name').value.trim();
-    const race = valueFor('race'), cls = valueFor('class'), background = valueFor('background');
-    if (!name || !race || !cls || !background) {
-      error.textContent = 'Заполните имя и выберите расу, класс и предысторию.';
-      return;
-    }
-    const details = document.getElementById('creator-details').value.trim();
-    const description = `${world ? world.prompt + '\n' : ''}Мой персонаж: имя — ${name}; раса — ${race}; класс — ${cls}; предыстория — ${background}. ${details} Создай лист героя для профиля, но в ответе не перечисляй характеристики и умения: кратко представь героя и начни первую сцену в 4–6 коротких абзацах.`;
-    startGame(description, {name, race, class: cls, background});
-  };
-  if (world) document.getElementById('creator-skip').onclick = () => {
-    startGame(world.prompt + ' Если я ещё не описал персонажа — сначала предложи 2–3 варианта расы, класса и предыстории на выбор.');
-  };
-  redraw();
-}
-
-/* TTS */
+/* ═══════════ TTS ═══════════ */
 const tts = {
   enabled: false, voice: null, rate: 1.0, speaking: false,
   lastText: '', available: ('speechSynthesis' in window)
@@ -811,7 +780,7 @@ function ttsClean(text) {
   return text
     .replace(/\[\[.*?\]\]/g, '').replace(/\[.*?\]/g, '')
     .replace(/\*+.*?\*+/g, '')
-    .replace(/[🎲🔊🔈⏩⏹🎙🖼📜💾📂✨❓🌍🔍🚶🗣⚔🛌🎒🎯🧍🪑🧎🐎🏊🪜🤝⛓🛡⭐📈✓✗●▶○🎁🏛👤📝✉🔔💬📔]/g, '')
+    .replace(/[🎲🔊🔈⏩⏹🎙🖼📜💾📂✨❓🌍🔍🚶🗣⚔🛌🎒🎯🧍🪑🧎🐎🏊🪜🤝⛓🛡⭐📈✓✗●▶○🎁🏛👤📝✉🔔💬📔🔄📤📥📋✅📁]/g, '')
     .replace(/https?:\/\/\S+/g, '')
     .replace(/[\u{1F000}-\u{1FAFF}]/gu, '')
     .replace(/\s+/g, ' ').trim();
@@ -937,6 +906,23 @@ function updateNotesBadge() {
 }
 
 /* STATUS */
+function renderCharacterTraits(character) {
+  const traits = ['race', 'class', 'background'].map(key => {
+    const value = typeof character[key] === 'string' ? character[key].trim() : '';
+    if (!value) return '';
+    const category = CHARACTER_CATEGORIES.find(category => category.key === key);
+    const option = category.options.find(([, name]) => name.toLocaleLowerCase('ru') === value.toLocaleLowerCase('ru'));
+    const icon = option?.[0] || CHARACTER_CUSTOM_ICON;
+    return `<li class="identity-trait" title="${category.label}">
+      <span class="identity-trait-icon" aria-hidden="true">${icon}</span>
+      <span class="identity-trait-name">${esc(value)}</span>
+    </li>`;
+  }).join('');
+  return traits
+    ? `<ul class="identity-traits" aria-label="Раса, класс и предыстория">${traits}</ul>`
+    : '<div class="identity-sub">Персонаж пока не создан</div>';
+}
+
 function renderStatus() {
   if (!state) { statusEl.innerHTML = ''; return; }
   const hpPct = state.max_hp ? Math.max(0, Math.min(100, state.hp / state.max_hp * 100)) : 0;
@@ -959,22 +945,22 @@ function renderStatus() {
     ? `<span class="status-chip cover">${covInfo.icon} ${esc(covInfo.label)}</span>` : '';
   const restrChip = state.restrained
     ? `<span class="status-chip dc-up">⛓ Связан</span>` : '';
+
   statusEl.innerHTML = `
     <div class="status-top">
-      <button class="identity-crest" type="button" title="Открыть лист персонажа" aria-label="Открыть лист персонажа">${characterIcon('class', state.class)}</button>
-      <div class="status-info">
-        <div class="status-name">${esc(state.name || 'Пустой')}</div>
-        <div class="identity-tags">${characterIdentity(state)}</div>
-        <div class="status-chips">
-          <span class="status-chip">Ур. ${state.level}</span>
-          ${state.level_pending ? `<span class="status-chip" title="Обсуди повышение с мастером">⬆ Повышение!</span>` : ''}
-          <span class="status-chip">💰 ${state.gold}</span>
-          ${posChip}
-          ${covChip}
-          ${restrChip}
-          ${dcChip}
-        </div>
+      <div class="identity">
+        <div class="identity-name">${esc(state.name || 'Пустой')}</div>
+        ${renderCharacterTraits(state)}
       </div>
+    </div>
+    <div class="status-chips">
+      <span class="status-chip">Ур. ${state.level}</span>
+      ${state.level_pending ? `<span class="status-chip" title="Обсуди повышение с мастером">⬆ Повышение!</span>` : ''}
+      <span class="status-chip">💰 ${state.gold}</span>
+      ${posChip}
+      ${covChip}
+      ${restrChip}
+      ${dcChip}
     </div>
     <div class="status-row"><span style="color:#d45a5a;font-size:11px;width:20px">HP</span>
       <div class="bar-wrap"><div class="bar-fill bar-hp" style="width:${hpPct}%"></div></div>
@@ -983,8 +969,7 @@ function renderStatus() {
       <div class="bar-wrap"><div class="bar-fill bar-xp" style="width:${xpPct}%"></div></div>
       <span class="bar-label">${state.xp}/${state.xp_next}</span></div>
     ${c ? `<div class="status-row" style="font-size:12px;color:var(--text-secondary)">${c}</div>` : ''}`;
-  const crest = statusEl.querySelector('.identity-crest');
-  if (crest) crest.onclick = doSheet;
+
   updateNotesBadge();
 }
 
@@ -1022,120 +1007,8 @@ function addHtmlMsg(role, html) {
   chatEl.appendChild(d); scrollBottom(); return d;
 }
 
-/* Gameplay cards are local UI events, NOT model dialogue. Their position is
-   counted in dialogue messages, so dice/stats survive saved-game restore without
-   changing XP IDs or incremental campaign memory hashes. */
-const STAT_LABELS = [
-  ['str', 'СИЛ', 'Сила'], ['dex', 'ЛОВ', 'Ловкость'], ['con', 'ТЕЛ', 'Телосложение'],
-  ['int', 'ИНТ', 'Интеллект'], ['wis', 'МДР', 'Мудрость'], ['cha', 'ХАР', 'Харизма']
-];
-function snapshotCharacter(st) {
-  const s = st && typeof st === 'object' ? st : {};
-  const stats = {};
-  for (const [key] of STAT_LABELS) {
-    const n = Number((s.stats || {})[key]);
-    stats[key] = Number.isFinite(n) ? n : null;
-  }
-  return {
-    name: s.name || 'Герой', race: s.race || '', class: s.class || '',
-    background: s.background || '', level: s.level ?? 1,
-    hp: s.hp ?? 10, max_hp: s.max_hp ?? 10, xp: s.xp ?? 0,
-    xp_next: s.xp_next ?? 100, gold: s.gold ?? 0, stats
-  };
-}
-function characterSheetHtml(s) {
-  const stats = s.stats || {};
-  const statBoxes = STAT_LABELS.map(([key, shortName, longName]) => {
-    const val = Number(stats[key]);
-    const valid = stats[key] !== null && stats[key] !== undefined && Number.isFinite(val);
-    const modifier = valid ? Math.floor((val - 10) / 2) : null;
-    const modText = modifier === null ? '—' : (modifier >= 0 ? '+' : '') + modifier;
-    return `<div class="sheet-stat" title="${longName}"><div class="sheet-stat-name">${shortName}</div><div class="sheet-stat-value">${valid ? esc(val) : '—'}</div><div class="sheet-stat-mod">${modText}</div></div>`;
-  }).join('');
-  return `<div class="sheet-heading">📜 Лист героя · ${esc(s.name || 'Герой')}</div>
-    <div class="identity-tags">${characterIdentity(s)}</div>
-    <div class="sheet-meta"><span>⭐ Уровень ${esc(s.level ?? 1)}</span>
-    <span>❤️ HP ${esc(s.hp ?? 10)}/${esc(s.max_hp ?? 10)}</span>
-    <span>✨ XP ${esc(s.xp ?? 0)}/${esc(s.xp_next ?? 100)}</span>
-    <span>🪙 Золото ${esc(s.gold ?? 0)}</span></div>
-    <div class="sheet-stats">${statBoxes}</div>
-    <div class="sheet-footer">Полный лист и умения — в профиле персонажа.</div>`;
-}
-function diceResultHtml(roll) {
-  const rolls = Array.isArray(roll.rolls) ? roll.rolls.map(n => esc(n)).join(' + ') : '';
-  const mod = Number(roll.mod) || 0;
-  const modText = mod === 0 ? '' : (mod > 0 ? ' + ' : ' − ') + Math.abs(mod);
-  const calc = rolls ? `${rolls}${modText} = ${esc(roll.total)}` : esc(roll.total);
-  const label = roll.label ? ` ${esc(String(roll.label).slice(0, 40))}` : ' кубика';
-  const dc = Number(roll.dc);
-  const difficulty = roll.dc !== undefined && roll.dc !== null && Number.isInteger(dc) && dc > 0 && dc <= 99
-    ? ` · Сложность ${dc}` : '';
-  return `<div class="dice-label">🎲 Бросок${label}</div>
-    <div><b>${esc(roll.expr)}</b> → <span class="dice-total">${esc(roll.total)}</span></div>
-    <div class="dice-details">Расчёт: ${calc}${difficulty}</div>`;
-}
-/* Resolve the check most recently ANNOUNCED by the GM. A quick 1d20 roll
-   inherits its explicitly displayed modifier; never guess the modifier for
-   unrelated dice or override /roll 1d20+N entered by the player. */
-function pendingDeclaredCheck() {
-  const last = messages[messages.length - 1];
-  if (!last || last.role !== 'assistant') return null;
-  const text = String(last.content || '').slice(-600);
-  const checks = /(?:бросок|проверка|бросьте|киньте|кидайте|проверьте)[^\r\n]{0,180}/gi;
-  const stats = [
-    [/ловкост/i, 'dex', 'Ловкости'],
-    [/телосложен/i, 'con', 'Телосложения'],
-    [/интеллект/i, 'int', 'Интеллекта'],
-    [/мудрост/i, 'wis', 'Мудрости'],
-    [/харизм/i, 'cha', 'Харизмы'],
-    [/сил[аыуе]/i, 'str', 'Силы']
-  ];
-  let found = null;
-  for (const sectionMatch of text.matchAll(checks)) {
-    const section = sectionMatch[0];
-    const dice = /(?:1d20|d20)(?![\w])\s*([+\-−]\s*\d{1,2})?/i.exec(section);
-    if (!dice) continue;
-    const attribute = stats.find(([re]) => re.test(section));
-    let modifier = 0;
-    if (dice[1]) {
-      modifier = Number(dice[1].replace(/\s/g, '').replace('−', '-'));
-      // Example: 1d20+2 (Ловкость) +1 (Акробатика).
-      // Only accept another immediately adjacent, labelled bonus; never
-      // accidentally add a DC adjustment mentioned later in the scene.
-      const afterDice = section.slice(dice.index + dice[0].length);
-      const skill = /^(?:\s*\([^)]{1,40}\))?\s*([+\-−]\s*\d{1,2})(?=\s*(?:\(|$|[—–,]))/.exec(afterDice);
-      if (skill) modifier += Number(skill[1].replace(/\s/g, '').replace('−', '-'));
-    } else if (attribute) {
-      const score = Number(state && state.stats && state.stats[attribute[1]]);
-      if (Number.isFinite(score) && score >= 1 && score <= 30) {
-        modifier = Math.floor((score - 10) / 2);
-      }
-    }
-    const dcMatch = /(?:сложност[ьи]|\bDC\b|\bКС\b)\s*[:=№]?\s*(\d{1,2})(?!\d)/i.exec(section);
-    found = {
-      mod: Number.isInteger(modifier) ? modifier : 0,
-      label: attribute ? attribute[2] : '',
-      dc: dcMatch ? Number(dcMatch[1]) : null
-    };
-  }
-  return found;
-}
-
-function showUiEvent(event) {
-  if (event.kind === 'character_sheet') return addHtmlMsg('character-sheet', characterSheetHtml(event.sheet || {}));
-  if (event.kind === 'dice') return addHtmlMsg('dice', diceResultHtml(event.roll || {}));
-}
-function recordUiEvent(event) {
-  uiEvents.push({...event, at: messages.length});
-  showUiEvent(event);
-  persist();
-}
-function isCharacterReady(s) {
-  return !!(s && s.name && s.name !== 'Пустой' && (s.race || s.class));
-}
-
 /* API CALLS */
-async function callAI(msgs, options = {}) {
+async function callAI(msgs) {
   busy = true; sendBtn.disabled = true;
   document.querySelectorAll('.quick-btn').forEach(b => b.disabled = true);
   if (tts.speaking) ttsStop();
@@ -1143,36 +1016,35 @@ async function callAI(msgs, options = {}) {
   md.className = 'msg master typing-indicator';
   chatEl.appendChild(md); scrollBottom();
   let full = '';
-  let streamFailed = false;
+  let turnId = '';
   try {
-    const res = await apiFetch('/api/chat', {
+    const res = await fetch('/api/chat', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({messages: msgs, state, memory})
+      body: JSON.stringify({messages: msgs, state})
     });
     if (!res.ok) throw new Error('HTTP ' + res.status);
+    turnId = res.headers.get('X-Turn-Id') || '';
     const reader = res.body.getReader(); const dec = new TextDecoder();
     md.classList.remove('typing-indicator');
     while (true) {
       const {done, value} = await reader.read();
       if (done) break;
-      const c = dec.decode(value, { stream: true});
+      const c = dec.decode(value, {stream: true});
       if (!c) continue;
       full += c; md.textContent = full; scrollBottom();
     }
     const t = dec.decode();
     if (t) { full += t; md.textContent = full; scrollBottom(); }
   } catch(e) {
-    streamFailed = true;
     md.classList.remove('typing-indicator');
-    md.remove();
-    addMsg('system', `Ошибка ответа ИИ: ${e.message}. Ответ не записан в историю.`);
+    md.textContent = (full || '') + `\n[Ошибка: ${e.message}]`;
   }
   if (full.trim() && full.includes('[Ошибка API:')) {
     md.remove();
     addMsg('system', full.trim() + '\n\nОтвет не добавлен в историю игры. Можно повторить отправку.');
     full = '';
   }
-  if (full.trim() && !streamFailed) {
+  if (full.trim()) {
     messages.push({role: 'assistant', content: full});
     persist();
     md.remove();
@@ -1184,60 +1056,41 @@ async function callAI(msgs, options = {}) {
         ttsSpeak(full, btn);
       }, 60);
     }
-    const wasEmptyCharacter = !isCharacterReady(state);
-    const stateOk = await updateState();
-    if (stateOk && isCharacterReady(state) &&
-        (options.characterCreated || wasEmptyCharacter) &&
-        !uiEvents.some(e => e.kind === 'character_sheet')) {
-      recordUiEvent({kind: 'character_sheet', sheet: snapshotCharacter(state)});
-    }
-    await updateMemory();
+    await updateState(turnId);
   }
   busy = false; sendBtn.disabled = false;
   document.querySelectorAll('.quick-btn').forEach(b => b.disabled = false);
   inputEl.focus();
 }
-async function updateState() {
+async function updateState(turnId) {
   if (!state) state = {...EMPTY_STATE};
+  const headers = {'Content-Type': 'application/json'};
+  if (turnId) headers['X-Turn-Id'] = turnId;
   try {
-    const res = await apiFetch('/api/state', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
+    const res = await fetch('/api/state', {
+      method: 'POST', headers,
       body: JSON.stringify({messages, state})
     });
     if (res.ok) {
       const oldLevel = Number(state.level || 1);
-      state = await res.json();
+      const updated = await res.json();
+      if (state.character_setup_pending) {
+        for (const key of ['name', 'race', 'class', 'background']) updated[key] = state[key];
+        delete updated.character_setup_pending;
+      }
+      state = updated;
       if (Number(state.level || 1) > oldLevel) {
         const gained = Number(state.level) - oldLevel;
         addMsg('system', `🎉 Доступно повышение уровня: ${state.level} (получено уровней: ${gained}). Обсуди с мастером выбор повышения характеристик и умения.`);
       }
       renderStatus(); persist();
-      return true;
     }
-    return false;
-  } catch(e) {
-    addMsg('system', 'Не удалось обновить лист персонажа: ' + e.message);
-    return false;
-  }
-}
-
-async function updateMemory() {
-  const summarizedCount = Number(memory && memory.covered_count || 0);
-  if (messages.length - summarizedCount < 26) return;
-  try {
-    const res = await apiFetch('/api/memory', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({messages, memory})
-    });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    memory = await res.json();
-    persist();
-  } catch(e) { console.warn('Память пока не обновлена:', e); }
+  } catch(e){}
 }
 
 /* SEND */
-async function sendMessage(text, options = {}) {
-  if (busy || rolling) return;
+async function sendMessage(text) {
+  if (busy) return;
   text = (text || '').trim();
   if (!text) return;
   if (text.startsWith('/')) {
@@ -1246,13 +1099,11 @@ async function sendMessage(text, options = {}) {
     handleCommand(c.toLowerCase(), r.join(' '));
     return;
   }
-  const createButton = chatEl.querySelector('[data-create-character]');
-  if (createButton) createButton.remove();
   addMsg('user', text);
   messages.push({role: 'user', content: text});
   persist();
   inputEl.value = ''; autosize();
-  await callAI(messages, options);
+  await callAI(messages);
 }
 function handleCommand(cmd, arg) {
   switch(cmd) {
@@ -1262,44 +1113,31 @@ function handleCommand(cmd, arg) {
     case '/notes': return doNotes();
     case '/save': return doSave(arg);
     case '/load': return doLoad(arg);
+    case '/transfer': return doTransfer();
     case '/reset': return doReset();
     case '/help': return doHelp();
     default: addMsg('system', `Неизвестная команда: ${cmd}. Введите /help.`);
   }
 }
 async function doRoll(expr) {
-  if (busy || rolling) return;
-  // A plain d20 means "roll the check you just asked for" when the GM
-  // announced one. Explicit /roll 1d20+N always takes priority.
-  const check = /^\s*(?:1d20|d20)\s*$/i.test(String(expr)) ? pendingDeclaredCheck() : null;
-  const effectiveExpr = check && check.mod
-    ? `1d20${check.mod > 0 ? '+' : ''}${check.mod}` : expr;
-  rolling = true;
+  if (busy) return;
   const animDiv = addHtmlMsg('dice',
-    `<span class="dice-emoji">🎲</span> Бросок ${esc(effectiveExpr)}...`);
+    `<span class="dice-emoji">🎲</span> Бросок ${esc(expr)}...`);
+  await new Promise(r => setTimeout(r, 450));
+  animDiv.remove();
   try {
-    await new Promise(r => setTimeout(r, 450));
-    const res = await apiFetch('/api/roll', {
+    const res = await fetch('/api/roll', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({expr: effectiveExpr})
+      body: JSON.stringify({expr})
     });
     const d = await res.json();
-    if (!res.ok || d.error) throw new Error(d.error || 'Не удалось выполнить бросок');
-    const mod = d.mod ? (d.mod > 0 ? '+' + d.mod : '' + d.mod) : '';
-    animDiv.remove();
-    // Show the roll card BEFORE the master's streamed response, and keep it in saves.
-    recordUiEvent({kind: 'dice', roll: {
-      expr: d.expr, rolls: d.rolls, mod: d.mod, total: d.total,
-      label: check ? check.label : '', dc: check ? check.dc : null
-    }});
+    if (d.error) { addMsg('system', 'Ошибка броска: ' + d.error); return; }
+    const m = d.mod ? (d.mod > 0 ? '+' + d.mod : '' + d.mod) : '';
+    addHtmlMsg('dice', `🎲 <b>${esc(d.expr)}</b> → [${d.rolls.join(', ')}]${m} = <b>${d.total}</b>`);
     messages.push({role: 'user', content:
-      `[[БРОСОК]] ${d.expr} → [${d.rolls.join(', ')}]${mod} = ${d.total}. ` +
-      `Это ОКОНЧАТЕЛЬНЫЙ результат, бонус характеристики уже учтён: НЕ прибавляй модификаторы второй раз. ` +
-      `Сравни ${d.total} с DC, который ты объявил ранее. Опиши исход без повторного броска.`});
-    persist();
-    await callAI(messages);
-  } catch(e) { animDiv.remove(); addMsg('system', 'Ошибка броска: ' + e.message); }
-  finally { rolling = false; }
+      `[[БРОСОК]] ${d.expr} → [${d.rolls.join(', ')}]${m} = ${d.total}. Сравни с DC, который ты объявил ранее. Опиши результат, успех/провал/осложнение. Не решай за игрока.`});
+    persist(); await callAI(messages);
+  } catch(e) { addMsg('system', 'Ошибка: ' + e.message); }
 }
 
 /* SHEET */
@@ -1408,18 +1246,14 @@ async function doSheet() {
     const m = Math.floor((val - 10) / 2);
     return m >= 0 ? '+' + m : '' + m;
   };
+
   const notesCount = (state.notes || []).length;
   const notesUnread = (state.notes || []).filter(n => n.unread).length;
 
   modalContent.innerHTML = `
-    <div class="identity-hero">
-      <div class="identity-hero-crest" aria-hidden="true">${characterIcon('class', state.class)}</div>
-      <div><h3>📜 ${esc(state.name || 'Пустой')}</h3>
-      <div class="identity-tags">${characterIdentity(state)}</div></div>
-    </div>
-    <div class="kv"><span class="k">Раса</span><span class="v">${characterIcon('race', state.race)} ${esc(state.race || '—')}</span></div>
-    <div class="kv"><span class="k">Класс</span><span class="v">${characterIcon('class', state.class)} ${esc(state.class || '—')}</span></div>
-    <div class="kv"><span class="k">Предыстория</span><span class="v">${characterIcon('background', state.background)} ${esc(state.background || '—')}</span></div>
+    <h3>📜 ${esc(state.name || 'Пустой')}</h3>
+    ${state.race || state.class ? `<div class="kv"><span class="k">Раса · Класс</span><span class="v">${esc(state.race || '—')} · ${esc(state.class || '—')}</span></div>` : ''}
+    ${state.background ? `<div class="kv"><span class="k">Предыстория</span><span class="v">${esc(state.background)}</span></div>` : ''}
     <div class="kv"><span class="k">Уровень</span><span class="v">${state.level}${state.level_pending ? ` · повышение доступно (${state.level_pending})` : ''}</span></div>
     <div class="kv"><span class="k">Опыт</span><span class="v">${state.xp} / ${state.xp_next}</span></div>
     <div class="kv"><span class="k">Здоровье</span><span class="v">${state.hp} / ${state.max_hp}</span></div>
@@ -1608,16 +1442,47 @@ async function doSkills() {
   modalEl.classList.add('open');
 }
 
-/* SAVE / LOAD / RESET / HELP */
+/* ═══════════ СОХРАНЕНИЯ ═══════════ */
+
+function fmtTime(ts) {
+  if (!ts) return 'время неизвестно';
+  const d = new Date(ts * 1000);
+  if (isNaN(d.getTime())) return 'время неизвестно';
+  const now = new Date();
+  const time = d.toLocaleTimeString('ru-RU', {hour: '2-digit', minute: '2-digit'});
+  if (d.toDateString() === now.toDateString()) return 'сегодня, ' + time;
+  const yest = new Date(now);
+  yest.setDate(now.getDate() - 1);
+  if (d.toDateString() === yest.toDateString()) return 'вчера, ' + time;
+  return d.toLocaleDateString('ru-RU', {day: '2-digit', month: '2-digit', year: 'numeric'})
+         + ', ' + time;
+}
+
+function fmtSize(bytes) {
+  if (!bytes && bytes !== 0) return '';
+  if (bytes < 1024) return bytes + ' Б';
+  if (bytes < 1024 * 1024) return Math.round(bytes / 1024) + ' КБ';
+  return (bytes / 1024 / 1024).toFixed(1) + ' МБ';
+}
+
 async function doSave(name) {
   if (!name) {
     name = await promptModal('Название сохранения', 'game-' + Date.now());
     if (!name) return;
   }
+  // Если имя занято — спросим. Прежняя версия останется в .bak.json
   try {
-    const res = await apiFetch('/api/save', {
+    const r = await fetch('/api/saves');
+    const list = await r.json();
+    if (Array.isArray(list) && list.some(s => s.name === name)) {
+      if (!confirm(`Сохранение «${name}» уже есть. Перезаписать?`)) return;
+    }
+  } catch (e) { /* список недоступен — просто сохраняем */ }
+
+  try {
+    const res = await fetch('/api/save', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({name, messages, state, memory, ui_events: uiEvents})
+      body: JSON.stringify({name, messages, state})
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const d = await res.json();
@@ -1625,135 +1490,271 @@ async function doSave(name) {
     addMsg('system', `💾 Сохранено: «${d.name}»`);
   } catch(e) { addMsg('system', 'Ошибка сохранения: ' + e.message); }
 }
+
+/* Список сохранений: клик по имени — загрузить, ✎ — переименовать, 🗑 — удалить.
+   Промис разрешается именем выбранного сохранения либо null. */
+function savesModal() {
+  return new Promise(resolve => {
+    let items = [];
+    let note = '';
+    let closed = false;
+
+    const finish = v => { if (!closed) { closed = true; modalEl.classList.remove('open'); resolve(v); } };
+
+    async function refresh() {
+      try {
+        const r = await fetch('/api/saves');
+        const d = await r.json();
+        items = Array.isArray(d) ? d : [];
+      } catch (e) { items = []; }
+      render();
+    }
+
+    function render() {
+      const rows = items.length ? items.map(s => `
+        <div class="save-row">
+          <div class="save-col">
+            <div class="save-name" data-name="${esc(s.name)}" title="Нажмите, чтобы загрузить">${esc(s.name)}</div>
+            <div class="save-meta">${esc(fmtTime(s.saved_at))}${s.size ? ' · ' + esc(fmtSize(s.size)) : ''}</div>
+          </div>
+          <button class="note-action-btn" data-act="rename" data-name="${esc(s.name)}" title="Переименовать">✎</button>
+          <button class="note-action-btn" data-act="delete" data-name="${esc(s.name)}" title="Удалить">🗑</button>
+        </div>`).join('') : '<div class="tag empty">нет сохранений</div>';
+
+      modalContent.innerHTML = `
+        <h3>📂 Сохранения</h3>
+        ${note ? `<div class="save-note">${esc(note)}</div>` : ''}
+        <div style="display:flex;flex-direction:column;gap:8px;max-height:55vh;overflow-y:auto">${rows}</div>
+        <button class="btn primary" id="modal-cancel">Закрыть</button>`;
+      modalEl.classList.add('open');
+
+      modalContent.querySelectorAll('.save-name').forEach(el => {
+        el.onclick = () => finish(el.dataset.name);
+      });
+
+      modalContent.querySelectorAll('[data-act]').forEach(btn => {
+        btn.onclick = async (e) => {
+          e.stopPropagation();
+          const nm = btn.dataset.name;
+          if (btn.dataset.act === 'rename') {
+            const nn = await promptModal('Новое имя', nm);
+            if (!nn || nn === nm) { note = ''; render(); return; }
+            try {
+              const r = await fetch('/api/save/rename', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({name: nm, new_name: nn})
+              });
+              const d = await r.json().catch(() => ({}));
+              note = d.ok ? `Переименовано: «${nm}» → «${nn}»`
+                          : 'Не удалось переименовать: ' + (d.error || ('HTTP ' + r.status));
+            } catch (err) { note = 'Не удалось переименовать: ' + err.message; }
+          } else {
+            if (!confirm(`Удалить сохранение «${nm}»?\n\nЭто необратимо.`)) { note = ''; render(); return; }
+            try {
+              const r = await fetch('/api/save/delete', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({name: nm})
+              });
+              const d = await r.json().catch(() => ({}));
+              note = d.ok ? `Удалено: «${nm}»`
+                          : 'Не удалось удалить: ' + (d.error || ('HTTP ' + r.status));
+            } catch (err) { note = 'Не удалось удалить: ' + err.message; }
+          }
+          await refresh();
+        };
+      });
+
+      document.getElementById('modal-cancel').onclick = () => finish(null);
+    }
+
+    refresh();
+  });
+}
+
 async function doLoad(name) {
-  let saves;
-  try { saves = await (await apiFetch('/api/saves')).json(); }
-  catch(e) { addMsg('system', 'Ошибка: ' + e.message); return; }
-  if (!saves.length) { addMsg('system', 'Нет сохранений.'); return; }
   if (!name) {
-    name = await listModal('Выберите сохранение', saves);
+    name = await savesModal();
     if (!name) return;
   }
   try {
-    const res = await apiFetch('/api/load/' + encodeURIComponent(name));
+    const res = await fetch('/api/load/' + encodeURIComponent(name));
     if (!res.ok) throw new Error('не найдено');
     const d = await res.json();
     messages = d.messages || [];
     state = d.state || {...EMPTY_STATE};
-    memory = d.memory || {};
-    uiEvents = Array.isArray(d.ui_events) ? d.ui_events : [];
+    resetSession();                 // резюме прежней партии больше не актуально
     persist(); renderAll(); renderStatus();
-    await updateMemory();
     addMsg('system', `📂 Загружено: «${name}»`);
   } catch(e) { addMsg('system', 'Ошибка: ' + e.message); }
 }
-async function manageSaves() {
-  let saves;
-  try {
-    const res = await apiFetch('/api/saves');
-    if (!res.ok) throw new Error('Не удалось получить список сохранений');
-    saves = await res.json();
-  } catch (e) { addMsg('system', 'Ошибка списка сохранений: ' + e.message); return; }
-  if (!saves.length) { addMsg('system', 'Нет сохранений для управления.'); return; }
-  modalContent.innerHTML = `<h3>Управление сохранениями</h3>
-    <div style="display:flex;flex-direction:column;gap:10px">
-      ${saves.map(name => `<div style="display:flex;align-items:center;gap:8px;padding:10px;background:var(--bg-card);border:1px solid var(--border-subtle);border-radius:8px">
-        <div style="flex:1;min-width:0;overflow-wrap:anywhere">${esc(name)}</div>
-        <button class="btn" data-rename="${esc(name)}" style="padding:7px 10px">✏️</button>
-        <button class="btn" data-delete="${esc(name)}" style="padding:7px 10px;color:#e57373">🗑️</button>
-      </div>`).join('')}
+
+/* ═══════════ ПЕРЕНОС ПАРТИИ ═══════════
+   Переносит партию между браузерами и устройствами обычным текстом.
+   Во встроенных браузерах (Telegram, Instagram) нет ни консоли,
+   ни закладок, ни букмарклетов — а копирование текста работает везде.
+
+   Переносятся обе части партии:
+     messages — вся история ходов и ответов мастера
+     state    — персонаж: имя, раса, класс, уровень, XP, HP,
+                инвентарь, заметки, квесты, отношения. */
+
+function doTransfer() {
+  const current = JSON.stringify({messages, state});
+  const charName = (state && state.name) || 'Пустой';
+
+  modalContent.innerHTML = `
+    <h3>🔄 Перенос партии</h3>
+    <div class="transfer-hint">
+      <b>Сохранить копию:</b> нажмите «Скопировать» и вставьте текст в Заметки
+      или отправьте себе в «Избранное».<br>
+      <b>Загрузить:</b> вставьте текст в поле (или возьмите файл) и нажмите «Применить».
     </div>
-    <button class="btn" id="manage-close">Закрыть</button>`;
+    <textarea id="transfer-area" class="transfer-area" spellcheck="false"></textarea>
+    <div id="transfer-info" class="transfer-info"></div>
+    <div class="transfer-row">
+      <button class="btn" id="transfer-copy">📋 Скопировать</button>
+      <button class="btn" id="transfer-download">💾 Скачать файл</button>
+    </div>
+    <div class="transfer-row">
+      <button class="btn" id="transfer-file-btn">📁 Из файла</button>
+      <button class="btn primary" id="transfer-apply">✅ Применить</button>
+    </div>
+    <input type="file" id="transfer-file" accept=".json,application/json" style="display:none">
+    <button class="btn" id="transfer-close">Закрыть</button>`;
+
+  const area = document.getElementById('transfer-area');
+  const info = document.getElementById('transfer-info');
+  const fileInput = document.getElementById('transfer-file');
+  area.value = current;
+
+  const showInfo = (msg, warn) => {
+    if (msg) {
+      info.textContent = msg;
+      info.className = 'transfer-info' + (warn ? ' warn' : '');
+      return;
+    }
+    const kb = Math.max(1, Math.round(area.value.length / 1024));
+    info.textContent =
+      `В поле: ${kb} КБ. Текущая партия: сообщений ${messages.length}, ` +
+      `персонаж «${charName}».`;
+    info.className = 'transfer-info';
+  };
+  showInfo();
+  area.addEventListener('input', () => showInfo());
+
+  document.getElementById('transfer-close').onclick = () =>
+    modalEl.classList.remove('open');
+
+  document.getElementById('transfer-copy').onclick = async () => {
+    const btn = document.getElementById('transfer-copy');
+    area.focus();
+    area.select();
+    let ok = false;
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(area.value);
+        ok = true;
+      }
+    } catch (e) {}
+    if (!ok) { try { ok = document.execCommand('copy'); } catch (e) {} }
+    btn.textContent = ok ? '✓ Скопировано' : 'Скопируйте вручную';
+    setTimeout(() => { btn.textContent = '📋 Скопировать'; }, 2000);
+  };
+
+  document.getElementById('transfer-download').onclick = () => {
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+    const blob = new Blob([area.value], {type: 'application/json'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `rpg-${charName}-${stamp}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  };
+
+  document.getElementById('transfer-file-btn').onclick = () => fileInput.click();
+
+  fileInput.onchange = () => {
+    const f = fileInput.files && fileInput.files[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => { area.value = String(reader.result || ''); showInfo(); };
+    reader.readAsText(f);
+  };
+
+  document.getElementById('transfer-apply').onclick = () => {
+    const raw = area.value.trim();
+    if (!raw) { showInfo('Поле пустое.', true); return; }
+    if (raw === current) { showInfo('Это ваша текущая партия — менять нечего.'); return; }
+
+    let d;
+    try {
+      d = JSON.parse(raw);
+    } catch (e) {
+      showInfo('Текст повреждён или скопирован не полностью.', true);
+      return;
+    }
+    if (!d || !Array.isArray(d.messages)) {
+      showInfo('Это не похоже на партию: нет списка сообщений.', true);
+      return;
+    }
+    const nm = (d.state && d.state.name) || 'Пустой';
+    const lvl = (d.state && d.state.level) || 1;
+    if (!confirm(`Заменить текущую партию?\n\n` +
+                 `Загружаемая: «${nm}», уровень ${lvl}, сообщений ${d.messages.length}.\n` +
+                 `Текущая партия будет потеряна.`)) return;
+
+    messages = d.messages;
+    state = d.state || {...EMPTY_STATE};
+    resetSession();
+    persist();
+    chatEl.innerHTML = '';
+    renderAll();
+    renderStatus();
+    modalEl.classList.remove('open');
+    addMsg('system',
+      `🔄 Партия загружена: «${state.name || 'Пустой'}», уровень ${state.level || 1}, ` +
+      `сообщений ${messages.length}. Нажмите «💾 Сохранить», чтобы она попала на сервер.`);
+  };
+
   modalEl.classList.add('open');
-  document.getElementById('manage-close').onclick = () => modalEl.classList.remove('open');
-  modalContent.querySelectorAll('[data-rename]').forEach(btn => btn.onclick = async () => {
-    const oldName = btn.dataset.rename;
-    const newName = await promptModal('Переименовать сохранение', oldName);
-    if (!newName) { manageSaves(); return; }
-    if (newName === oldName) { manageSaves(); return; }
-    try {
-      const res = await apiFetch('/api/save/rename', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({old_name:oldName,new_name:newName})});
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Не удалось переименовать');
-      addMsg('system', `✏️ Сохранение переименовано: «${oldName}» → «${data.name}»`);
-      manageSaves();
-    } catch(e) { addMsg('system', 'Ошибка переименования: ' + e.message); }
-  });
-  modalContent.querySelectorAll('[data-delete]').forEach(btn => btn.onclick = async () => {
-    const name = btn.dataset.delete;
-    if (!confirm(`Удалить сохранение «${name}» и его резервную копию? Это действие нельзя отменить.`)) return;
-    try {
-      const res = await apiFetch('/api/save/delete', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})});
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Не удалось удалить');
-      addMsg('system', `🗑️ Удалено сохранение: «${name}»`);
-      manageSaves();
-    } catch(e) { addMsg('system', 'Ошибка удаления: ' + e.message); }
-  });
 }
 
 function doReset() {
-  if (!confirm('Начать новую игру? Текущая история будет потеряна.')) return;
-  messages = []; state = {...EMPTY_STATE}; memory = {}; uiEvents = [];
-  ttsStop();
-  persist(); chatEl.innerHTML = ''; renderStatus(); showIntro();
+  openCharacterBuilder();
 }
+
 function doHelp() {
   addHtmlMsg('system', 'Команды:<br><code>/roll 1d20+3</code> — бросок<br>' +
     '<code>/sheet</code> — полный лист<br><code>/skills</code> — умения и навыки<br>' +
     '<code>/notes</code> — заметки, письма, документы<br>' +
     '<code>/save имя</code> — сохранить<br><code>/load имя</code> — загрузить<br>' +
-    '<code>/reset</code> — новая игра<br><br>' +
-    'Быстрый d20 учитывает бонус последней проверки, объявленной мастером. Для ручного броска используйте /roll 1d20+3.<br>' +
+    '<code>/transfer</code> — перенос партии<br><code>/reset</code> — новая игра<br><br>' +
     'Заметки, письма, документы, слухи — в отдельной вкладке 📝, не в инвентаре.<br>' +
-    'XP начисляется за убийства, победы без убийства и завершённые квесты.');
+    'XP начисляется за убийства, победы без убийства и завершённые квесты.<br>' +
+    'В окне загрузки можно переименовать (✎) и удалить (🗑) сохранение.<br>' +
+    '🔄 Перенос партии — чтобы продолжить игру в другом браузере или на другом устройстве.');
 }
+
 function renderAll() {
   chatEl.innerHTML = '';
-  // Event positions point to the *next* dialogue message; events at the end
-  // are rendered after the most recent reply. Ignore invalid legacy entries.
-  const events = new Map();
-  (Array.isArray(uiEvents) ? uiEvents : []).forEach(event => {
-    if (!event || !Number.isInteger(event.at) || event.at < 0 || event.at > messages.length) return;
-    if (!['dice', 'character_sheet'].includes(event.kind)) return;
-    if (!events.has(event.at)) events.set(event.at, []);
-    events.get(event.at).push(event);
-  });
-  for (let i = 0; i <= messages.length; i++) {
-    for (const event of (events.get(i) || [])) showUiEvent(event);
-    if (i === messages.length) break;
-    const m = messages[i];
+  messages.forEach(m => {
     if (m.role === 'user') {
-      if (m.content.startsWith('[[БРОСОК]]')) {
-        // New dice cards already appear above; old saves still show the result.
-        if (!(events.get(i) || []).some(e => e.kind === 'dice')) {
-          const rollText = m.content.replace(/^\[\[БРОСОК\]\]\s*/, '').split('. Сравни с DC')[0];
-          addMsg('dice', '🎲 ' + rollText);
-        }
-      } else {
-        addMsg('user', m.content.replace(/^\[\[СИСТЕМА\]\]\s*/, ''));
-      }
+      const c = m.content.replace(/^\[\[(БРОСОК|СИСТЕМА)\]\]\s*/, '');
+      addMsg('user', c);
     } else if (m.role === 'assistant') {
       addMsg('master', m.content);
     }
-  }
+  });
   const lastMaster = [...messages].reverse().find(m => m.role === 'assistant');
   if (lastMaster) tts.lastText = lastMaster.content;
 }
 function showIntro() {
-  addMsg('system', 'Опишите персонажа, мир, тон и стартовую ситуацию.\n' +
-    'Можно нажать «🧬 Создать персонажа» ниже или написать героя своими словами.\n' +
-    'Например: «Я — эльф-плут Кейр, Преступник. Тёмное фэнтези, город на болоте. Начинаю в камере.»\n\n' +
-    'Мастер выставит характеристики, навыки, умения. XP за убийства и квесты начисляется автоматически.\n' +
-    'Письма, документы и слухи — в отдельной вкладке 📝 Заметки.');
-  const createButton = document.createElement('button');
-  createButton.type = 'button';
-  createButton.className = 'btn primary';
-  createButton.dataset.createCharacter = '1';
-  createButton.textContent = '🧬 Создать персонажа · раса, класс, предыстория';
-  createButton.style.alignSelf = 'center';
-  createButton.onclick = () => openCharacterCreator();
-  chatEl.appendChild(createButton);
+  const intro = addHtmlMsg('system',
+    '<button type="button" class="btn primary">Создать персонажа</button><br><br>' +
+    'Мир можно выбрать в меню. Чтобы начать без конструктора, опишите героя и завязку в чате.');
+  intro.querySelector('button').onclick = () => openCharacterBuilder();
 }
 function renderWorlds() {
   const container = document.getElementById('worlds-section');
@@ -1767,7 +1768,7 @@ function renderWorlds() {
       if (!world || busy) return;
       drawerEl.classList.remove('open');
       drawerBg.classList.remove('open');
-      openCharacterCreator(world);
+      openCharacterBuilder(world);
     };
   });
 }
@@ -1827,20 +1828,7 @@ function promptModal(title, ph) {
     };
   });
 }
-function listModal(title, items) {
-  return new Promise(res => {
-    modalContent.innerHTML = `<h3>${title}</h3>
-      <div style="display:flex;flex-direction:column;gap:8px">
-        ${items.map(i => `<div class="save-item" data-name="${esc(i)}">${esc(i)}</div>`).join('')}
-      </div>
-      <button class="btn" id="modal-cancel">Закрыть</button>`;
-    modalEl.classList.add('open');
-    const close = v => { modalEl.classList.remove('open'); res(v); };
-    modalContent.querySelectorAll('.save-item').forEach(el =>
-      el.onclick = () => close(el.dataset.name));
-    document.getElementById('modal-cancel').onclick = () => close(null);
-  });
-}
+
 function autosize() {
   inputEl.style.height = 'auto';
   inputEl.style.height = Math.min(inputEl.scrollHeight, 120) + 'px';
@@ -1891,27 +1879,22 @@ document.querySelectorAll('#drawer .btn[data-action]').forEach(btn => {
     const a = btn.dataset.action;
     if (a === 'dice') doRoll('1d20');
     else if (a === 'dice-custom') rollModal().then(v => { if (v) doRoll(v); });
-    else if (a === 'create') openCharacterCreator();
     else if (a === 'sheet') doSheet();
     else if (a === 'skills') doSkills();
     else if (a === 'notes') doNotes();
     else if (a === 'save') doSave();
     else if (a === 'load') doLoad();
-    else if (a === 'manage-saves') manageSaves();
+    else if (a === 'transfer') doTransfer();
     else if (a === 'reset') doReset();
     else if (a === 'help') doHelp();
-    else if (a === 'logout') logoutAccount();
   };
 });
 
-async function init() {
-  await ensureAuth();
+function init() {
   const saved = restore();
   if (saved && saved.messages.length) {
     messages = saved.messages;
     state = saved.state || {...EMPTY_STATE};
-    memory = saved.memory || {};
-    uiEvents = Array.isArray(saved.ui_events) ? saved.ui_events : [];
     // Совместимость
     if (!Array.isArray(state.relationships)) state.relationships = [];
     if (!Array.isArray(state.faction_clocks)) state.faction_clocks = [];
@@ -1945,7 +1928,6 @@ async function init() {
     }
     renderAll(); renderStatus();
     addMsg('system', '↩ История восстановлена. Продолжайте.');
-    await updateMemory();
   } else {
     state = {...EMPTY_STATE};
     renderStatus();
