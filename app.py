@@ -650,13 +650,15 @@ def summarize_old_messages(messages, session_id="", turn_id=None):
 
     system_messages = [m for m in messages if m.get("role") == "system"]
     dialogue = [m for m in messages if m.get("role") in ("user", "assistant")]
-    other_system = [m for m in system_messages
+    system_parts = [m.get("content", "") for m in system_messages
                     if not m.get("content", "").startswith("[РЕЗЮМЕ ПРОШЛОГО]")]
 
     def pack(text, tail):
-        head = ([{"role": "system", "content": f"[РЕЗЮМЕ ПРОШЛОГО]\n{text}"}]
-                if text else [])
-        return other_system + head + tail
+        # Qwen допускает только одно сообщение system в начале запроса.
+        parts = system_parts + ([f"[РЕЗЮМЕ ПРОШЛОГО]\n{text}"] if text else [])
+        if not parts:
+            return tail
+        return [{"role": "system", "content": "\n\n".join(parts)}] + tail
 
     persist = bool(session_id)
     st = _summary_get(session_id) if persist else {"text": "", "folded": 0}
@@ -700,7 +702,7 @@ def summarize_old_messages(messages, session_id="", turn_id=None):
         # Если резюме ещё нет — режем историю по окну, чтобы не переполнить контекст.
         if summary_text:
             return pack(summary_text, tail)
-        return other_system + dialogue[-KEEP_RECENT:]
+        return pack("", dialogue[-KEEP_RECENT:])
 
     if persist:
         _summary_put(session_id, new_summary, target)
