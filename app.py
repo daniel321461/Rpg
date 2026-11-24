@@ -195,9 +195,14 @@ def _error_hint(exc):
 
 def _start_stream(messages):
     """Поддерживает провайдеры, отклоняющие штрафы или потоковый учёт токенов."""
-    options = dict(model=MODEL, messages=messages, temperature=0.9, stream=True,
-                   stream_options={"include_usage": True},
-                   frequency_penalty=FREQ_PENALTY, presence_penalty=PRES_PENALTY)
+    options = dict(model=MODEL, messages=messages, stream=True,
+                   stream_options={"include_usage": True})
+    if USE_YANDEX and MODEL.rsplit("/", 1)[-1] == "qwen3.6-35b-a3b":
+        # Use Qwen's non-thinking sampling profile for narration.
+        options.update(temperature=0.7, top_p=0.8, extra_body={"reasoning_effort": "none"})
+    else:
+        options.update(temperature=0.9, frequency_penalty=FREQ_PENALTY,
+                       presence_penalty=PRES_PENALTY)
     while True:
         try:
             return client.chat.completions.create(**options)
